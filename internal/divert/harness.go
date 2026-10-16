@@ -2744,6 +2744,10 @@ func (h *Harness) startLocked() error {
 		return errors.New("administrative privileges required to open WinDivert handle")
 	}
 
+	if !IsAvailable() {
+		return errors.New("WinDivert.dll not available")
+	}
+
 	if h.cfg.InterceptDNS && (h.cfg.Filter == "" || h.cfg.Filter == FilterOutboundProduction) {
 		h.cfg.Filter = FilterOutboundWithDNS
 	}

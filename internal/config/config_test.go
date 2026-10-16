@@ -1067,4 +1067,3 @@ func TestHostsSyncConfigValidation(t *testing.T) {
 		}
 	})
 }
-

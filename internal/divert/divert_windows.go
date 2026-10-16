@@ -52,6 +52,10 @@ func IsDLLLoaded() bool {
 // In Phase 2.1A, live handle opening is strictly prohibited. This function is provided
 // solely as dynamic binding scaffolding for future authorized milestones.
 func Open(filter string, layer uint32, priority int16, flags uint64) (Handle, error) {
+	if err := procWinDivertOpen.Find(); err != nil {
+		return InvalidHandle, fmt.Errorf("WinDivert.dll not available: %w", err)
+	}
+
 	filterPtr, err := syscall.BytePtrFromString(filter)
 	if err != nil {
 		return InvalidHandle, fmt.Errorf("invalid filter string: %w", err)
@@ -80,6 +84,9 @@ func Recv(h Handle, packet []byte, addr *Address) (int, error) {
 	}
 	if len(packet) == 0 {
 		return 0, errors.New("packet receive buffer cannot be empty")
+	}
+	if err := procWinDivertRecv.Find(); err != nil {
+		return 0, fmt.Errorf("WinDivert.dll not available: %w", err)
 	}
 
 	var recvLen uint32
@@ -115,6 +122,9 @@ func Send(h Handle, packet []byte, addr *Address) (int, error) {
 	if addr == nil {
 		return 0, errors.New("address metadata is required for WinDivertSend")
 	}
+	if err := procWinDivertSend.Find(); err != nil {
+		return 0, fmt.Errorf("WinDivert.dll not available: %w", err)
+	}
 
 	var sendLen uint32
 	r0, _, callErr := procWinDivertSend.Call(
@@ -138,6 +148,9 @@ func Close(h Handle) error {
 	if h == InvalidHandle {
 		return nil
 	}
+	if err := procWinDivertClose.Find(); err != nil {
+		return fmt.Errorf("WinDivert.dll not available: %w", err)
+	}
 	r0, _, callErr := procWinDivertClose.Call(uintptr(h))
 	if r0 == 0 {
 		if callErr != nil && callErr != syscall.Errno(0) {
@@ -152,6 +165,9 @@ func Close(h Handle) error {
 func SetParam(h Handle, param uint32, value uint64) error {
 	if h == InvalidHandle {
 		return errors.New("cannot set parameter on InvalidHandle")
+	}
+	if err := procWinDivertSetParam.Find(); err != nil {
+		return fmt.Errorf("WinDivert.dll not available: %w", err)
 	}
 	r0, _, callErr := procWinDivertSetParam.Call(
 		uintptr(h),

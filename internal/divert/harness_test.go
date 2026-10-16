@@ -73,11 +73,25 @@ func TestFilterOutboundWithDNSSyntax(t *testing.T) {
 	}
 }
 
-func TestFilterOutboundWithDNSEval(t *testing.T) {
-	dll, err := syscall.LoadDLL(filepath.Join("..", "..", "WinDivert.dll"))
-	if err != nil {
-		t.Skipf("WinDivert.dll not available for eval test: %v", err)
+func findTestWinDivertDLL(t *testing.T) *syscall.DLL {
+	t.Helper()
+	candidates := []string{
+		filepath.Join("..", "..", "WinDivert.dll"),
+		"WinDivert.dll",
+		filepath.Join("..", "WinDivert.dll"),
 	}
+	for _, candidate := range candidates {
+		dll, err := syscall.LoadDLL(candidate)
+		if err == nil {
+			return dll
+		}
+	}
+	t.Skip("WinDivert.dll not available in CI environment, skipping live filter evaluation")
+	return nil
+}
+
+func TestFilterOutboundWithDNSEval(t *testing.T) {
+	dll := findTestWinDivertDLL(t)
 	defer dll.Release()
 
 	evalFilterProc, err := dll.FindProc("WinDivertHelperEvalFilter")
@@ -4687,10 +4701,7 @@ func TestHandleCandidateFragmentation_SNILessPacket1(t *testing.T) {
 }
 
 func TestFilterOutboundIPv6TCPSYN(t *testing.T) {
-	dll, err := syscall.LoadDLL(filepath.Join("..", "..", "WinDivert.dll"))
-	if err != nil {
-		t.Skipf("WinDivert.dll not available for eval test: %v", err)
-	}
+	dll := findTestWinDivertDLL(t)
 	defer dll.Release()
 
 	evalFilterProc, err := dll.FindProc("WinDivertHelperEvalFilter")
@@ -5598,10 +5609,7 @@ func TestDoHBootstrapIPFastPathAndSinkholeRSTACK(t *testing.T) {
 }
 
 func TestWinDivertFilterCompileAndEvalBootstrapAndSinkhole(t *testing.T) {
-	dll, err := syscall.LoadDLL(filepath.Join("..", "..", "WinDivert.dll"))
-	if err != nil {
-		t.Skipf("WinDivert.dll not available for eval test: %v", err)
-	}
+	dll := findTestWinDivertDLL(t)
 	defer dll.Release()
 
 	compileFilterProc, err := dll.FindProc("WinDivertHelperCompileFilter")
@@ -5693,19 +5701,28 @@ func TestWinDivertFilterCompileAndEvalBootstrapAndSinkhole(t *testing.T) {
 			}
 		}
 	}
+}
 
-	// 3. Verify batch scripts contain no echo lines with parentheses that break cmd.exe if/for blocks
-	for _, relPath := range []string{"../../start-bypass.bat", "../../launch-discord.bat", "../../stop-and-recover.bat"} {
-		data, err := os.ReadFile(relPath)
+func TestBatchScriptsSyntax(t *testing.T) {
+	scriptNames := []string{"start-bypass.bat", "launch-discord.bat", "stop-and-recover.bat"}
+	for _, name := range scriptNames {
+		var data []byte
+		var err error
+		for _, cand := range []string{filepath.Join("..", "..", name), name, filepath.Join("..", name)} {
+			data, err = os.ReadFile(cand)
+			if err == nil {
+				break
+			}
+		}
 		if err != nil {
-			t.Fatalf("read %s: %v", relPath, err)
+			t.Fatalf("could not read batch script %s: %v", name, err)
 		}
 		lines := strings.Split(string(data), "\n")
 		for idx, line := range lines {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(strings.ToLower(trimmed), "echo ") {
 				if strings.Contains(trimmed, "(") || strings.Contains(trimmed, ")") {
-					t.Errorf("%s line %d contains parenthesis inside echo statement: %s", relPath, idx+1, trimmed)
+					t.Errorf("%s line %d contains parenthesis inside echo statement: %s", name, idx+1, trimmed)
 				}
 			}
 		}

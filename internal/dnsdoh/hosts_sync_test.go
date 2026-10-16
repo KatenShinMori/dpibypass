@@ -771,6 +771,3 @@ func TestHasHostsBackupDetection(t *testing.T) {
 		t.Fatalf("expected (true, nil) when backup exists, got (%v, %v)", has, err)
 	}
 }
-
-
-
