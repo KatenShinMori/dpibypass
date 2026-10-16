@@ -1,4 +1,4 @@
-# dpibypass — High-Performance Wire-Level DPI Bypass Engine for Windows
+# dpibypass — Wire-Level DPI Bypass Engine for Windows
 
 [![Go Version](https://img.shields.io/badge/Go-1.22%2B-blue.svg)](https://golang.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6.svg)](https://microsoft.com)
@@ -7,44 +7,75 @@
 
 **[English](README.en.md) | [Türkçe](README.md)**
 
-**dpibypass** is a pure Go, wire-level Deep Packet Inspection (DPI) evasion engine and transparent DNS bridge designed for Windows x64. It operates at the kernel network layer via WinDivert to protect TCP (TLS/HTTP) and UDP traffic system-wide without requiring external proxies, VPNs, or browser extensions.
+**dpibypass** is a pure Go, wire-level Deep Packet Inspection (DPI) evasion tool and DNS bridge designed for Windows x64. It operates at the kernel network layer via WinDivert to capture and modify TCP (TLS/HTTP) and UDP packets without requiring external proxies, VPNs, or browser extensions.
 
-Specifically engineered to defeat stateful middlebox inspection (such as Türk Telekom / BTK throttling and censorship), **dpibypass** successfully bypasses blocks on Discord (native desktop app and voice gateways), Roblox, and web targets.
+Specifically designed to mitigate stateful middlebox inspection and SNI-based filtering, **dpibypass** provides packet manipulation techniques and DoH-based domain resolution for services experiencing DPI restrictions, such as Discord (desktop client and voice gateways) and Roblox.
 
 ---
 
-## Key Architectural Innovations
+## Limitations
+
+- **SNI/DPI Blocks Only:** Only effective against domain-name (SNI) and packet inspection-based filtering. It cannot bypass IP-based blocks, BGP routing blackholes, or direct server-side blocks.
+- **Windows 10/11 x64 Only:** Requires the WinDivert 2.2.2 x64 driver; 32-bit Windows, Linux, and macOS are not supported.
+- **Administrator Privileges Required:** Must be run with Administrator privileges to open the WinDivert kernel driver handle and update the Windows `hosts` file.
+- **Antivirus Flags (False Positives):** Because WinDivert is a low-level packet capture driver, some antivirus vendors may flag it as suspicious or unwanted software.
+- **Kernel Anti-Cheat Conflicts:** Can conflict with kernel-level anti-cheat software (such as Easy Anti-Cheat, BattlEye, Vanguard). The driver should be paused or dpibypass exited before launching protected games.
+- **ISP and Regional Variations:** Middlebox hardware, inspection rules, and network topology differ across ISPs, regions, and connection types. Settings working on one network may not work on another.
+
+---
+
+## What This Tool Changes on Your System
+
+1. **WinDivert Kernel Driver:** Temporarily registers and starts the `WinDivert64.sys` driver service to capture and inject network packets.
+2. **Windows `hosts` File:** Resolves clean IP addresses for configured domains (e.g. Discord, Roblox) via DoH and writes them between `# BEGIN DPIBYPASS MANAGED HOSTS` and `# END DPIBYPASS MANAGED HOSTS` markers in `C:\Windows\System32\drivers\etc\hosts`. Backs up the original file before modifying.
+3. **Local Web UI:** Binds a lightweight HTTP server on loopback `127.0.0.1:8787` for metrics and status monitoring.
+
+### How `recover` Undoes These Changes
+Running `dpibypass recover` or `stop-and-recover.bat`:
+- Removes the `# BEGIN DPIBYPASS MANAGED HOSTS` block from the `hosts` file (or restores the original backup).
+- Stops and unloads the WinDivert driver service (`sc stop WinDivert` / service deletion).
+- Restores any system proxy settings if proxy mode was previously enabled.
+- Flushes the Windows DNS cache (`ipconfig /flushdns`).
+
+---
+
+## Responsible Use & Disclaimer
+
+This tool is developed for educational, testing, and diagnostic purposes to analyze DPI behavior and network filtering mechanisms. Users are solely responsible for ensuring compliance with applicable local laws, regulations, and terms of service. The author provides no warranties and accepts no liability for misuse, downtime, or software conflicts.
+
+---
+
+## Key Architecture & Features
 
 ### 1. Pure Go Kernel Harness via WinDivert ABI (Zero CGO)
-Unlike traditional tools that require C compilers or heavyweight third-party runtimes, `dpibypass` communicates directly with `WinDivert.dll` and `WinDivert64.sys` using pure Go standard library syscalls and structured ABI definitions. It features:
+Communicates directly with `WinDivert.dll` and `WinDivert64.sys` using pure Go standard library syscalls and structured ABI definitions without C compiler toolchain dependencies:
 - **Pre-allocated 64 KiB buffer sizing** for Windows Large Send Offload (LSO/TSO) packet bursts.
-- **Microsecond wire-level filtering** that passes non-target traffic straight through with zero overhead.
+- **Wire-level filtering** that passes non-target traffic straight through.
 
-### 2. Post-Quantum TLS 1.3 Multi-Packet SNI Splitting
-Modern Chromium-based applications (including Electron apps like the native Discord desktop client) send ~1,900-byte Post-Quantum (`X25519MLKEM768`) TLS 1.3 `ClientHello` records.
-- **Pre-Segmented Packet 2 Continuation Tracking:** In large handshakes, the Windows TCP stack segments the payload before egress, placing the 1,216-byte key share in Packet 1 and the Server Name Indication (SNI) extension in Packet 2. `dpibypass` dynamically tracks TCP sequence continuations and intercepts Packet 2, desyncing and splitting right at the SNI boundary (`sni-mid`).
-- **Out-of-Order Injection:** Transmits Segment 2 before Segment 1 onto the wire so middlebox reassembly engines fail to extract the target domain name.
-- **MTU Safety Subsegmentation:** Automatically bounds injected chunks to `<= 1400` bytes to prevent Ethernet MTU drops.
+### 2. Multi-Packet TLS 1.3 SNI Splitting
+Modern Chromium-based applications (including Electron apps like Discord) can send large (~1,900-byte) TLS 1.3 `ClientHello` records due to post-quantum key shares (e.g., `X25519MLKEM768`).
+- **Pre-Segmented Packet 2 Tracking:** When the Windows TCP stack segments the handshake before egress, the SNI extension often lands in Packet 2. `dpibypass` tracks sequence numbers, intercepts the packet with the SNI, and splits it at the SNI boundary (`sni-mid`).
+- **Out-of-Order Injection:** Injects Segment 2 before Segment 1 onto the wire so simple middlebox reassembly engines fail to extract the plain SNI.
+- **MTU Bounds:** Bounds injected fragments to `<= 1400` bytes to minimize Ethernet MTU fragmentation drops.
 
-### 3. Low-TTL Middlebox Poisoning (Fake Packet Injection)
+### 3. Low-TTL Middlebox Desync (Fake Packet Injection)
 - Synthesizes a valid TLS `ClientHello` with a benign SNI (e.g., `www.example.com`) sharing the exact 4-tuple and TCP sequence numbers.
-- Transmits the fake packet with a low hop count (e.g., `TTL 3` or `TTL 4`) so it blinds the ISP middlebox at hop 3 and evaporates before reaching the destination server.
-- Supports multi-hop TTL interleaving to resist ECMP routing shifts.
+- Transmits the fake packet with a low hop count (e.g., `TTL 3` or `TTL 4`) so it reaches the ISP middlebox and drops before reaching the destination server.
+- Supports multi-hop TTL interleaving against ECMP route shifts.
 
-### 4. Zero-DNS DoH Bootstrap & Automated Windows `hosts` Sync
-ISP DNS sinkholing (e.g. redirecting domains to `195.175.254.2`) poisons Windows `Dnscache` and Chromium's in-memory `net::HostCache`. `dpibypass` eliminates this:
-- **Zero-DNS Bootstrap:** Directly dials Anycast IPs (`1.1.1.1`, `8.8.8.8`) over HTTPS, preventing bootstrap DNS deadlocks.
-- **Automated `hosts` Sync:** Concurrently resolves live, clean IPv4 records for Discord and Roblox endpoints on startup and atomically manages the `# BEGIN DPIBYPASS MANAGED HOSTS` block in `C:\Windows\System32\drivers\etc\hosts`.
-- **WFP Impostor Capture:** Captures UDP port 53 queries even when re-injected by third-party antivirus WFP filters (such as Kaspersky), synthesizing inbound RFC 768 software-checksummed responses.
-- **Clean Recovery:** Automatically restores the original `hosts` file upon exit or recovery.
+### 4. DoH Bootstrap & Windows `hosts` Sync
+- **Zero-DNS Bootstrap:** Connects directly to Anycast IPs (`1.1.1.1`, `8.8.8.8`) over HTTPS to avoid local DNS poisoning.
+- **Automated `hosts` Sync:** Resolves clean IPv4 addresses for configured domains and updates the managed block in `C:\Windows\System32\drivers\etc\hosts`.
+- **UDP Port 53 Capture:** Intercepts local UDP DNS queries and responds with DoH-resolved records.
+- **Clean Recovery:** Restores the hosts file cleanly upon exit or recovery.
 
 ### 5. IPv6 Happy Eyeballs Fallback (RFC 8305)
-Dual-stack ISP routers often route connections over IPv6 where packet manipulation is unconfigured. `dpibypass` suppresses outbound IPv6 TCP SYN packets on ports 80/443 and answers IPv6 DNS with clean `NODATA` responses, forcing client applications to fall back immediately within 1ms to protected IPv4 paths.
+Suppresses outbound IPv6 TCP SYN packets on ports 80/443 and answers IPv6 DNS with `NODATA` responses to encourage dual-stack clients to fall back quickly to protected IPv4 paths.
 
 ### 6. Embedded Loopback WebUI & Anti-Cheat Safe Mode
-Runs an optional, zero-dependency dashboard on `127.0.0.1:8787`:
+Optional dashboard running on `127.0.0.1:8787`:
 - Live metrics: packets intercepted, synthetic fake packets, split segments, and DoH resolutions.
-- **Anti-Cheat Safe Mode (`Pause / Resume Driver`):** Temporarily closes kernel driver handles and unloads the driver service on demand so kernel anti-cheat engines (Easy Anti-Cheat, BattlEye, Vanguard) can launch without conflicts.
+- **Anti-Cheat Safe Mode (`Pause / Resume Driver`):** Temporarily unloads the WinDivert driver service on demand to minimize conflicts with kernel anti-cheat systems.
 
 ---
 
@@ -54,24 +85,24 @@ All batch scripts auto-elevate to Administrator privileges on Windows:
 
 | Script / Command | Purpose |
 |---|---|
-| **`launch-discord.bat`** | **Recommended for Discord.** Flushes DNS, validates clean domain resolution, starts the wire engine in the background, and launches Discord desktop client. |
+| **`launch-discord.bat`** | **Launcher for Discord.** Flushes DNS, validates clean domain resolution, starts the wire engine in the background, and launches Discord desktop client. |
 | **`start-bypass.bat`** | Starts the packet engine with WebUI dashboard at `http://127.0.0.1:8787`. |
 | **`stop-and-recover.bat`** | Stops the engine, unloads the WinDivert driver, cleans up `hosts` file entries, and flushes DNS cache. |
-| **`test-live.ps1`** | **ISP Benchmark & Profile Tuner.** Automated 8-profile live ISP benchmark (`powershell -ExecutionPolicy Bypass -File .\test-live.ps1 -NoPause`) testing candidate fake modes and TTL hop counts (`TTL 3` to `TTL 6`, `multi-ttl`, `wrong-chksum`, and pure split) against live targets (`updates.discord.com`, `discord.com`, `gateway.discord.gg`, `www.roblox.com`) to benchmark and recommend the winning profile for your network. |
+| **`test-live.ps1`** | **ISP Benchmark & Profile Tuner.** PowerShell test tool evaluating candidate fake modes and TTL hop counts against live target domains. |
 
 ---
 
-## ISP Compatibility & Multi-ISP Tuning (Turkey)
+## ISP Compatibility & Tuning (Turkey)
 
-`dpibypass` is specifically hardened against Turkish ISP middleboxes (BTK / DPI filter architecture) and supports all major network providers:
+Network topologies and filtering rules differ across ISPs and regions:
 
-| ISP / Provider | Status & Recommended Strategy | Technical Notes |
+| ISP / Provider | Status | Strategy / Technical Notes |
 |---|---|---|
-| **Türk Telekom** | **Verified 100% Out-of-the-Box** (`fake_ttl: 4`, `sni-mid`) | Middlebox is typically located at hop 3 or 4. `dpibypass` automatically traps and drops connections to Türk Telekom's sinkhole IP (`195.175.254.2`) with an instant inbound TCP `RST+ACK`, synchronizes clean Anycast IPs via DoH to `hosts`, and blinds middleboxes via `TTL 4` fake packets. |
-| **Turkcell Superonline** | **Fully Supported** (Self-tuning `TTL 3`–`6` or `TTL 4`) | Superonline implements strict transparent UDP port 53 hijacking. `dpibypass` completely neutralizes this via direct IP DoH bootstrap (`1.1.1.1:443`) and local Windows `hosts` sync. Because DPI middlebox hop distances vary by city and fiber topology, run `.\test-live.ps1` or `dpibypass.exe tune --mode packet --domains discord.com,www.roblox.com --apply` to automatically select your optimal local hop count. |
-| **Vodafone Net** | **Fully Supported** (Default profile / `AutoLearner`) | Defeats Vodafone DPI filters through QUIC suppression (`drop_quic: true`), IPv6 TCP SYN dropping to force Happy Eyeballs IPv4 fallback, and adaptive retransmission escalation (`TTL 4 -> 3 -> 5`). |
-| **Türksat Kablonet** | **Fully Supported** (Default profile) | Clean bypass on Docsis / GPON infrastructure via out-of-order TLS record splitting and DoH-to-`hosts` sync. |
-| **TurkNet** | **Fully Supported** (Default profile) | Works seamlessly across GigaFiber and VDSL networks with zero configuration changes. |
+| **Türk Telekom** | Tested by the author | Tested with `fake_ttl: 4` and `sni-mid`. Middlebox is typically located at hop 3 or 4. `dpibypass` intercepts sinkhole redirects, resolves clean IPs via DoH to `hosts`, and uses low-TTL fake packets to bypass middlebox inspection. |
+| **Turkcell Superonline** | Untested - feedback welcome | Transparent UDP port 53 redirection can be addressed via DoH and `hosts` sync. Hop distance may vary; can be tuned with `.\test-live.ps1` or `tune`. |
+| **Vodafone Net** | Untested - feedback welcome | Uses QUIC drop (`drop_quic: true`), IPv6 TCP SYN suppression to encourage IPv4 fallback, and adaptive retransmissions. |
+| **Türksat Kablonet** | Untested - feedback welcome | Out-of-order TLS record splitting and DoH-to-`hosts` sync. |
+| **TurkNet** | Untested - feedback welcome | Standard default packet profile configuration. |
 
 ### Running the Live Multi-Profile Benchmark
 To benchmark all 8 evasion profiles on your specific connection:

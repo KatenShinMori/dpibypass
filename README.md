@@ -1,4 +1,4 @@
-# dpibypass — Windows İçin Yüksek Performanslı Hat Düzeyi (Wire-Level) DPI Atlama Motoru
+# dpibypass — Windows İçin Hat Düzeyi (Wire-Level) DPI Atlama Motoru
 
 [![Go Sürümü](https://img.shields.io/badge/Go-1.22%2B-blue.svg)](https://golang.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6.svg)](https://microsoft.com)
@@ -7,44 +7,75 @@
 
 **[English](README.en.md) | [Türkçe](README.md)**
 
-**dpibypass**, Windows x64 işletim sistemleri için geliştirilmiş saf Go (pure Go) mimarisinde, hat düzeyinde (wire-level) Derin Paket İnceleme (DPI) atlatma motoru ve şeffaf DNS köprüsüdür. WinDivert aracılığıyla doğrudan çekirdek ağ katmanında çalışarak; harici vekil sunucu (proxy), VPN veya tarayıcı eklentisi gerektirmeden tüm sistem çapında TCP (TLS/HTTP) ve UDP trafiğini korur.
+**dpibypass**, Windows x64 işletim sistemleri için geliştirilmiş, Go dilinde yazılmış bir hat düzeyi (wire-level) Derin Paket İnceleme (DPI) atlatma aracı ve DNS köprüsüdür. WinDivert aracılığıyla çekirdek ağ katmanında paketleri yakalayarak ve yeniden düzenleyerek harici vekil sunucu (proxy) veya VPN gerektirmeden TCP (TLS/HTTP) ve UDP trafiğinde DPI manipülasyonu uygular.
 
-Özellikle Türk servis sağlayıcılarının (Türk Telekom, Turkcell Superonline vb.) durum bilgili (stateful) DPI filtrelerini (BTK kısıtlamaları ve bant genişliği daraltmaları) aşmak üzere optimize edilen **dpibypass**; Discord (yerel masaüstü istemcisi ve ses sunucuları), Roblox ve engellenen tüm web hedeflerini başarıyla açar.
+Özellikle servis sağlayıcıların SNI tabanlı filtreleme ve DPI kısıtlamalarını aşmayı amaçlayan araç; Discord (masaüstü istemcisi ve ses bağlantıları) ve Roblox gibi hizmetlerde yaşanan DPI kaynaklı erişim sorunlarını gidermeye yönelik teknikler içerir.
 
 ---
 
-## Temel Mimari Yenilikler
+## Kısıtlamalar (Limitations)
 
-### 1. WinDivert ABI ile Saf Go Çekirdek Bağlantısı (Sıfır CGO)
-Geleneksel C derleyicilerine veya harici hantal kütüphanelere bağımlı araçların aksine `dpibypass`, doğrudan Go standart kütüphanesinin sistem çağrıları (syscall) ve yapılandırılmış ABI tanımları üzerinden `WinDivert.dll` ve `WinDivert64.sys` ile haberleşir:
-- **64 KiB Ön-Tahsisli Tampon Bellek:** Windows Large Send Offload (LSO/TSO) paket patlamalarını kayıpsız karşılar.
-- **Mikrosaniye Seviyesinde Hat Filtreleme:** Hedef dışı ağ trafiğini sıfır gecikmeyle doğrudan hattan geçirir.
+- **Yalnızca SNI/DPI Engelleri:** Sadece alan adı (SNI) ve paket içeriği incelemesine dayalı engellemelerde etkilidir. IP bloklama, BGP rotası engeli veya erişim noktası düzeyindeki doğrudan kesintileri aşamaz.
+- **Yalnızca Windows 10/11 x64:** WinDivert 2.2.2 x64 sürücüsü gerektirir; 32-bit Windows veya Linux/macOS desteklenmez.
+- **Yönetici Yetkisi Zorunludur:** WinDivert çekirdek sürücüsünü yüklemek ve `hosts` dosyasını yönetmek için Administrator hakları şarttır.
+- **Antivirüs Uyarıları (Yanlış Pozitif):** WinDivert bir ağ paket yakalama sürücüsü olduğu için bazı antivirüs yazılımları aracı şüpheli veya zararlı olarak işaretleyebilir.
+- **Anti-Cheat (Hile Koruma) Çakışmaları:** Easy Anti-Cheat, BattlEye, Riot Vanguard gibi çekirdek düzeyinde çalışan hile koruma sistemleriyle çakışabilir. Oyun başlatmadan önce sürücüyü duraklatmanız veya aracı kapatmanız gerekebilir.
+- **İSS ve Bölge Değişkenliği:** DPI donanımları, filtre kuralları ve ağ topolojisi servis sağlayıcıya, şehre veya bağlantı türüne göre farklılık gösterir. Bir hatta çalışan ayarlar başka bir hatta çalışmayabilir.
 
-### 2. Post-Quantum TLS 1.3 Çok Paketlik (Multi-Packet) SNI Bölümleme
-Modern Chromium tabanlı uygulamalar (Discord yerel Electron masaüstü istemcisi dahil), ~1.900 bayt boyutunda Post-Quantum (`X25519MLKEM768`) TLS 1.3 `ClientHello` paketleri gönderir:
-- **Ön-Bölümlenmiş Paket 2 Takibi:** Büyük el sıkışmalarda Windows TCP yığını yükü ağ kartından çıkmadan önce böler; 1.216 baytlık anahtar paylaşımı Paket 1'de, Sunucu Adı Belirteci (SNI) ise Paket 2'de yer alır. `dpibypass`, TCP sıra numaralarını (SeqNum) dinamik takip ederek Paket 2'yi yakalar, SNI orta noktasından (`sni-mid`) böler.
-- **Sırasız (Out-of-Order) Enjeksiyon:** Paket 2 Parça 2'yi Parça 1'den önce hatta ileterek middlebox inceleme motorlarının hedef alan adını yeniden birleştirmesini imkansız kılar.
-- **MTU Güvenliği Alt-Bölümlemesi:** Enjekte edilen parçaları otomatik olarak `<= 1400` bayt sınırında tutarak Ethernet MTU paket düşmelerini engeller.
+---
 
-### 3. Düşük TTL ile Middlebox Zehirleme (Sentetik Sahte Paket Enjeksiyonu)
-- Gerçek paketle birebir aynı 4'lü demete (Src/Dst IP/Port) ve TCP sıra numarasına sahip, zararsız bir SNI (`www.example.com`) taşıyan geçerli bir TLS `ClientHello` sentezler.
-- Sahte paketi düşük bir sekme sayısı (örn. `TTL 3` veya `TTL 4`) ile hatta basarak servis sağlayıcının 3. sekmedeki DPI filtresini kör eder; paket hedef sunucuya varmadan hatta sönümlenir.
-- ECMP rota değişimlerine karşı çoklu TTL (Multi-TTL) desteği barındırır.
+## Bu Araç Sisteminizde Neleri Değiştirir?
 
-### 4. Sıfır DNS Bağımlı DoH Bootstrap ve Otomatik Windows `hosts` Eşitlemesi
-Servis sağlayıcıların DNS zehirleme altyapısı (alan adlarını `195.175.254.2` sinkhole IP'sine yönlendirme), Windows `Dnscache` ve Chromium'un bellek içi `net::HostCache` önbelleğini kilitler. `dpibypass` bunu tamamen ortadan kaldırır:
-- **Sıfır DNS Bootstrap:** Anycast IP adreslerine (`1.1.1.1`, `8.8.8.8`) doğrudan HTTPS üzerinden bağlanır, önyükleme DNS kilitlenmelerini önler.
-- **Otomatik `hosts` Eşitlemesi:** Başlangıçta Discord ve Roblox alan adları için temiz IPv4 adreslerini eşzamanlı çözer ve `C:\Windows\System32\drivers\etc\hosts` dosyasındaki `# BEGIN DPIBYPASS MANAGED HOSTS` bloğunu otomatik günceller.
-- **Kaspersky WFP Impostor Yakalama:** Antivirüs yazılımlarının WFP filtreleri tarafından yeniden hatta sürülen UDP port 53 paketlerini (`impostor` bayrağıyla) yakalar ve RFC 768 yazılımsal sağlama toplamıyla yanıtlar.
-- **Temiz Kurtarma:** Program kapandığında veya kurtarma modunda `hosts` dosyasını orijinal haline temizce geri döndürür.
+1. **WinDivert Çekirdek Sürücüsü:** Paketleri yakalamak ve enjekte etmek için geçici olarak `WinDivert64.sys` sürücüsünü sisteme yükler ve Windows servis kaydı açar.
+2. **Windows `hosts` Dosyası:** Belirlenen alan adlarının (örn. Discord, Roblox) temiz IP adreslerini DoH üzerinden çözerek `C:\Windows\System32\drivers\etc\hosts` dosyasına `# BEGIN DPIBYPASS MANAGED HOSTS` ve `# END DPIBYPASS MANAGED HOSTS` etiketleri arasına yazar. Öncesinde orijinal dosyanın yedeğini alır.
+3. **Yerel Web Arayüzü:** Durum ve istatistik takibi için yalnızca yerel loopback adresinde (`127.0.0.1:8787`) hafif bir HTTP sunucusu çalıştırır.
+
+### Kurtarma (`recover`) Bu Değişiklikleri Nasıl Geri Alır?
+`dpibypass recover` komutu veya `stop-and-recover.bat` çalıştırıldığında:
+- `hosts` dosyasındaki `# BEGIN DPIBYPASS MANAGED HOSTS` bloğunu temizler (veya yedekten geri yükler).
+- WinDivert sürücü servisini durdurur ve bellekten kaldırır (`sc stop WinDivert` / servis silme).
+- Varsa ayarlanmış sistem vekil sunucu (proxy) kayıtlarını temizler.
+- Windows DNS önbelleğini temizler (`ipconfig /flushdns`).
+
+---
+
+## Sorumlu Kullanım ve Yasal Uyarı
+
+Bu araç, ağ filtreleme davranışlarını ve DPI teknolojilerini analiz etmek amacıyla eğitim ve test amaçlı geliştirilmiştir. Aracın kullanımından doğabilecek yasal sorumluluklar, servis şartları uyumu ve kullanım şekli tamamen kullanıcıya aittir. Geliştirici hiçbir garanti vermez ve olası kesintilerden veya yazılım çakışmalarından sorumlu tutulamaz.
+
+---
+
+## Temel Mimari ve Özellikler
+
+### 1. WinDivert ABI ile Saf Go Çekirdek Bağlantısı
+Geleneksel C derleyicilerine bağımlı olmadan doğrudan Go standart kütüphanesinin sistem çağrıları (syscall) ve yapılandırılmış ABI tanımları üzerinden `WinDivert.dll` ve `WinDivert64.sys` ile haberleşir:
+- **64 KiB Ön-Tahsisli Tampon Bellek:** Windows Large Send Offload (LSO/TSO) paket patlamalarını karşılar.
+- **Hat Filtreleme:** Hedef dışı ağ trafiğini doğrudan hattan geçirir.
+
+### 2. TLS 1.3 Çok Paketlik (Multi-Packet) SNI Bölümleme
+Modern Chromium tabanlı uygulamalar (Discord yerel Electron masaüstü istemcisi dahil), büyük anahtar paylaşımları (örn. `X25519MLKEM768`) nedeniyle ~1.900 bayt boyutunda TLS 1.3 `ClientHello` paketleri gönderebilir.
+- **Ön-Bölümlenmiş Paket 2 Takibi:** Windows TCP yığını yükü ağ kartından çıkmadan önce böldüğünde, SNI uzantısı genellikle ikinci pakete denk gelir. `dpibypass`, TCP sıra numaralarını (SeqNum) takip ederek SNI uzantısını tespit eder ve SNI ortasından (`sni-mid`) böler.
+- **Sırasız (Out-of-Order) Enjeksiyon:** Segmentleri sırasız ileterek basit middlebox inceleme motorlarının hedef alan adını doğrudan okumasını zorlaştırır.
+- **MTU Sınırlandırması:** Enjekte edilen parçaları `<= 1400` bayt sınırında tutarak Ethernet MTU paket düşmelerini önlemeyi hedefler.
+
+### 3. Düşük TTL ile Middlebox Yanıltma (Sahte Paket Enjeksiyonu)
+- Gerçek paketle aynı 4'lü demete (Src/Dst IP/Port) ve TCP sıra numarasına sahip, zararsız bir SNI (`www.example.com`) taşıyan geçerli bir TLS `ClientHello` sentezler.
+- Sahte paketi düşük bir sekme sayısı (örn. `TTL 3` veya `TTL 4`) ile hatta basarak servis sağlayıcının DPI filtresine ulaşıp hedef sunucuya varmadan hatta sönümlenmesini amaçlar.
+- ECMP rota değişimlerine karşı çoklu TTL desteği barındırır.
+
+### 4. DoH Bootstrap ve Windows `hosts` Eşitlemesi
+- **DoH Bootstrap:** Anycast IP adreslerine (`1.1.1.1`, `8.8.8.8`) doğrudan HTTPS üzerinden bağlanarak yerel DNS engellemelerini atlatmayı amaçlar.
+- **Otomatik `hosts` Eşitlemesi:** Discord ve Roblox alan adları için temiz IPv4 adreslerini çözerek `C:\Windows\System32\drivers\etc\hosts` dosyasındaki yönetilen bloğu günceller.
+- **UDP Port 53 Yakalama:** Yerel DNS sorgularını yakalayıp DoH üzerinden yanıt döner.
+- **Temiz Kurtarma:** Program kapandığında veya kurtarma modunda `hosts` dosyasını orijinal haline geri döndürür.
 
 ### 5. IPv6 Happy Eyeballs Geri Düşüşü (RFC 8305)
-Çift yığınlı (dual-stack) modemlerde bağlantıların filtrelenen veya takılan IPv6 rotasına girmesini önlemek için 80/443 portlarındaki giden IPv6 TCP SYN paketlerini bastırır ve IPv6 DNS sorgularına temiz `NODATA` yanıtı döner. Böylece istemciler 1ms içinde korumalı IPv4 rotasına yönlendirilir.
+Çift yığınlı (dual-stack) modemlerde bağlantıların filtrelenen IPv6 rotasına girmesini önlemek için 80/443 portlarındaki giden IPv6 TCP SYN paketlerini bastırır ve IPv6 DNS sorgularına `NODATA` yanıtı döner. Böylece istemciler IPv4 rotasına yönlendirilir.
 
-### 6. Gömülü Loopback Web Arayüzü & Anti-Cheat Güvenli Modu
-`127.0.0.1:8787` adresinde çalışan gömülü kontrol paneli:
+### 6. Gömülü Web Arayüzü & Anti-Cheat Güvenli Modu
+`127.0.0.1:8787` adresinde çalışan kontrol paneli:
 - Canlı istatistikler: yakalanan paketler, sahte paketler, bölünen segmentler ve DoH çözümleri.
-- **Anti-Cheat Güvenli Modu (`Pause / Resume Driver`):** Easy Anti-Cheat, BattlEye ve Vanguard gibi çekirdek düzeyindeki hile koruma yazılımlarıyla çakışma yaşamadan oyunlara girmek için tek tıkla WinDivert sürücüsünü geçici olarak bellekten kaldırır ve istendiğinde tekrar devreye alır.
+- **Anti-Cheat Güvenli Modu (`Pause / Resume Driver`):** Hile koruma yazılımlarıyla çakışma riskini azaltmak için WinDivert sürücüsünü geçici olarak bellekten kaldırır ve istendiğinde tekrar devreye alır.
 
 ---
 
@@ -54,24 +85,24 @@ Tüm toplu iş dosyaları (`.bat`) Windows'ta otomatik olarak Yönetici yetkisin
 
 | Betik / Komut | Amaç |
 |---|---|
-| **`launch-discord.bat`** | **Discord için Önerilen Başlatıcı.** DNS önbelleğini temizler, alan adlarının temiz çözüldüğünü doğrular, arka planda wire motorunu başlatır ve Discord masaüstü istemcisini açar. |
+| **`launch-discord.bat`** | **Discord için Başlatıcı.** DNS önbelleğini temizler, alan adlarının temiz çözüldüğünü doğrular, arka planda wire motorunu başlatır ve Discord masaüstü istemcisini açar. |
 | **`start-bypass.bat`** | Paket motorunu `http://127.0.0.1:8787` adresindeki Web Arayüzü ile birlikte başlatır. |
 | **`stop-and-recover.bat`** | Motoru durdurur, WinDivert sürücüsünü bellekten kaldırır, `hosts` dosyasındaki eklemeleri temizler ve DNS önbelleğini yeniler. |
-| **`test-live.ps1`** | **İSS Karşılaştırmalı Test ve Profil Belirleyici.** Farklı sahte paket modlarını ve TTL sekme sayılarını (`TTL 3` - `TTL 6`, `multi-ttl`, `wrong-chksum` ve saf bölme) canlı hedefler (`updates.discord.com`, `discord.com`, `gateway.discord.gg`, `www.roblox.com`) üzerinde test eden ve bağlantınız için en iyi profili öneren 8 profilli otomatik kıyaslama aracı (`powershell -ExecutionPolicy Bypass -File .\test-live.ps1 -NoPause`). |
+| **`test-live.ps1`** | **İSS Karşılaştırmalı Test ve Profil Belirleyici.** Farklı sahte paket modlarını ve TTL sekme sayılarını canlı hedefler üzerinde test eden PowerShell aracı. |
 
 ---
 
-## Türkiye İSS Uyumluluğu ve İSS Ayarları
+## Türkiye İSS Uyumluluğu ve Ayarları
 
-`dpibypass`, Türkiye'deki internet servis sağlayıcılarının (BTK / DPI filtre mimarisi) kısıtlamalarına karşı özel olarak test edilmiş ve doğrulanmıştır:
+Farklı servis sağlayıcıların ağ topolojileri ve DPI kuralları değişiklik gösterebilir:
 
-| İSS / Sağlayıcı | Durum & Önerilen Strateji | Teknik Notlar |
+| İSS / Sağlayıcı | Durum | Strateji / Teknik Notlar |
 |---|---|---|
-| **Türk Telekom** | **Doğrulandı: Kurulumsuz %100 Çalışır** (`fake_ttl: 4`, `sni-mid`) | DPI middlebox genellikle 3 veya 4. sekmede yer alır. `dpibypass`, Türk Telekom'un sinkhole IP'sine (`195.175.254.2`) giden paketleri anında gelen TCP `RST+ACK` ile düşürür, temiz Anycast IP'lerini DoH ile `hosts` dosyasına işler ve `TTL 4` sahte paketleriyle DPI'ı kör eder. |
-| **Turkcell Superonline** | **Tam Desteklenir** (Otomatik Ayar `TTL 3`–`6` veya `TTL 4`) | Superonline giden UDP 53 portunu şeffaf olarak yönlendirir. `dpibypass`, doğrudan IP üzerinden çalışan DoH (`1.1.1.1:443`) ve yerel `hosts` eşitlemesiyle bunu tamamen aşar. Bölge ve fiber topolojisine göre DPI sekme mesafesi değişebildiğinden, en uygun değeri bulmak için `.\test-live.ps1` veya `dpibypass.exe tune --mode packet --domains discord.com,www.roblox.com --apply` çalıştırılabilir. |
-| **Vodafone Net** | **Tam Desteklenir** (Varsayılan profil / `AutoLearner`) | QUIC engelleme (`drop_quic: true`), IPv6 Happy Eyeballs geri düşüşü ve kademeli yeniden iletim öğrenmesi (`TTL 4 -> 3 -> 5`) ile Vodafone DPI filtrelerini atlatır. |
-| **Türksat Kablonet** | **Tam Desteklenir** (Varsayılan profil) | Docsis ve GPON altyapısında sırasız TLS kayıt bölümleme ve DoH-hosts eşitlemesi ile sorunsuz çalışır. |
-| **TurkNet** | **Tam Desteklenir** (Varsayılan profil) | GigaFiber ve VDSL hatlarında ek yapılandırma gerektirmeden tam performansla çalışır. |
+| **Türk Telekom** | Yazar tarafından test edildi | `fake_ttl: 4` ve `sni-mid` ile test edilmiştir. DPI filtresi genellikle 3 veya 4. sekmede bulunur. Sinkhole yönlendirmelerini engeller, temiz IP'leri DoH ile `hosts` dosyasına işler ve düşük TTL sahte paketleriyle incelemeyi atlatmayı dener. |
+| **Turkcell Superonline** | Test edilmedi - geri bildirim bekleniyor | Şeffaf UDP 53 yönlendirmesi DoH ve `hosts` eşitlemesi ile hedeflenir. Sekme mesafesi bölgeye göre değişebileceğinden `.\test-live.ps1` veya `tune` ile yerel TTL kalibrasyonu yapılabilir. |
+| **Vodafone Net** | Test edilmedi - geri bildirim bekleniyor | QUIC engelleme (`drop_quic: true`), IPv6 TCP SYN bastırma ve kademeli yeniden iletim stratejisi içerir. |
+| **Türksat Kablonet** | Test edilmedi - geri bildirim bekleniyor | Sırasız TLS kayıt bölümleme ve DoH-hosts eşitlemesi yapılandırması hedeflenir. |
+| **TurkNet** | Test edilmedi - geri bildirim bekleniyor | Standart varsayılan paket profili yapılandırması hedeflenir. |
 
 ### Canlı Profil Kıyaslama Testini Çalıştırma
 Bağlantınızda tüm 8 atlatma profilini test etmek için:
