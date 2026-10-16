@@ -216,3 +216,305 @@ func TestSyncManagedHosts_QueryTypeResolverDoesNotFallbackToLookupIP(t *testing.
 	}
 }
 
+func TestHostsBackupBeforeFirstModification(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+	backupPath := HostsBackupPath(tmpHosts)
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	initialContent := "# Original System Hosts\r\n127.0.0.1 localhost\r\n192.168.1.50 printer.local\r\n"
+	if err := os.WriteFile(tmpHosts, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("write initial hosts: %v", err)
+	}
+
+	// 1. Verify backup does not exist prior to sync
+	if _, err := os.Stat(backupPath); err == nil {
+		t.Fatalf("backup should not exist before first sync")
+	}
+
+	resolver := &mockHostsResolver{
+		lookupFn: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("162.159.135.232")}, nil
+		},
+	}
+
+	// 2. First sync creates backup
+	if err := SyncManagedHostsFile(context.Background(), tmpHosts, resolver, nil); err != nil {
+		t.Fatalf("first sync failed: %v", err)
+	}
+
+	backupBytes, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("read backup file after first sync: %v", err)
+	}
+	if string(backupBytes) != initialContent {
+		t.Fatalf("backup content mismatch:\ngot:\n%q\nwant:\n%q", string(backupBytes), initialContent)
+	}
+
+	// 3. Second sync with different data should NOT overwrite original backup
+	resolver2 := &mockHostsResolver{
+		lookupFn: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("162.159.99.99")}, nil
+		},
+	}
+	if err := SyncManagedHostsFile(context.Background(), tmpHosts, resolver2, nil); err != nil {
+		t.Fatalf("second sync failed: %v", err)
+	}
+
+	backupBytes2, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("read backup file after second sync: %v", err)
+	}
+	if string(backupBytes2) != initialContent {
+		t.Fatalf("backup content was overwritten on second sync:\ngot:\n%q\nwant:\n%q", string(backupBytes2), initialContent)
+	}
+
+	// 4. Removal retires the backup
+	if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+		t.Fatalf("remove failed: %v", err)
+	}
+	if _, err := os.Stat(backupPath); err == nil {
+		t.Fatalf("backup file should be retired after clean removal")
+	}
+
+	restoredBytes, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read restored hosts: %v", err)
+	}
+	if string(restoredBytes) != initialContent {
+		t.Fatalf("restored hosts mismatch:\ngot:\n%q\nwant:\n%q", string(restoredBytes), initialContent)
+	}
+}
+
+func TestHostsOnlyTouchesManagedBlockWithSurroundingContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	// Intentionally create a file where custom lines exist BEFORE and AFTER the managed block
+	initialCustom := strings.Join([]string{
+		"# Header comment",
+		"127.0.0.1 localhost",
+		"::1 localhost",
+		"# Trailing custom comment",
+		"10.0.0.1 devbox",
+	}, "\r\n") + "\r\n"
+
+	if err := os.WriteFile(tmpHosts, []byte(initialCustom), 0644); err != nil {
+		t.Fatalf("write hosts: %v", err)
+	}
+
+	resolver := &mockHostsResolver{
+		lookupFn: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("162.159.135.232")}, nil
+		},
+	}
+
+	if err := SyncManagedHostsFile(context.Background(), tmpHosts, resolver, nil); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// Verify all initial lines exist
+	synced, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read synced: %v", err)
+	}
+	syncedStr := string(synced)
+	if !strings.Contains(syncedStr, "# Header comment") || !strings.Contains(syncedStr, "10.0.0.1 devbox") {
+		t.Fatalf("custom content corrupted by sync:\n%s", syncedStr)
+	}
+
+	// Now remove
+	if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+		t.Fatalf("remove failed: %v", err)
+	}
+
+	cleaned, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read cleaned: %v", err)
+	}
+	cleanedStr := string(cleaned)
+	if strings.Contains(cleanedStr, BeginManagedHostsMarker) || strings.Contains(cleanedStr, EndManagedHostsMarker) {
+		t.Fatalf("managed markers lingering in:\n%s", cleanedStr)
+	}
+	if cleanedStr != initialCustom {
+		t.Fatalf("content outside managed block was modified:\ngot:\n%q\nwant:\n%q", cleanedStr, initialCustom)
+	}
+}
+
+func TestRemoveManagedHostsIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	initial := "127.0.0.1 localhost\r\n"
+	if err := os.WriteFile(tmpHosts, []byte(initial), 0644); err != nil {
+		t.Fatalf("write hosts: %v", err)
+	}
+
+	// 1. Remove on clean file is a no-op
+	if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+		t.Fatalf("remove on clean file failed: %v", err)
+	}
+	data, _ := os.ReadFile(tmpHosts)
+	if string(data) != initial {
+		t.Fatalf("clean file was modified by remove: %q", string(data))
+	}
+
+	// 2. Sync then multiple removes
+	resolver := &mockHostsResolver{
+		lookupFn: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("162.159.135.232")}, nil
+		},
+	}
+	if err := SyncManagedHostsFile(context.Background(), tmpHosts, resolver, nil); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	for i := 1; i <= 3; i++ {
+		if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+			t.Fatalf("remove iteration %d failed: %v", i, err)
+		}
+		curData, _ := os.ReadFile(tmpHosts)
+		if string(curData) != initial {
+			t.Fatalf("iteration %d content mismatch: %q", i, string(curData))
+		}
+	}
+}
+
+func TestHasManagedHostsDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+
+	// 1. Non-existent file
+	has, err := HasManagedHostsFile(filepath.Join(tmpDir, "nonexistent"))
+	if err != nil || has {
+		t.Fatalf("expected (false, nil) for non-existent file, got (%v, %v)", has, err)
+	}
+
+	// 2. Clean file
+	_ = os.WriteFile(tmpHosts, []byte("127.0.0.1 localhost\r\n"), 0644)
+	has, err = HasManagedHostsFile(tmpHosts)
+	if err != nil || has {
+		t.Fatalf("expected (false, nil) for clean file, got (%v, %v)", has, err)
+	}
+
+	// 3. File with managed block
+	withBlock := "127.0.0.1 localhost\r\n" + BeginManagedHostsMarker + "\r\n1.2.3.4 discord.com\r\n" + EndManagedHostsMarker + "\r\n"
+	_ = os.WriteFile(tmpHosts, []byte(withBlock), 0644)
+	has, err = HasManagedHostsFile(tmpHosts)
+	if err != nil || !has {
+		t.Fatalf("expected (true, nil) for file with managed block, got (%v, %v)", has, err)
+	}
+}
+
+func TestCrashLeftoverAndCorruptedRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	// Case A: Corrupted managed block missing the END marker (e.g., hard crash mid-write)
+	corrupted := strings.Join([]string{
+		"127.0.0.1 localhost",
+		BeginManagedHostsMarker,
+		"1.2.3.4 partial-domain.com",
+		// Missing END marker
+	}, "\r\n") + "\r\n"
+
+	if err := os.WriteFile(tmpHosts, []byte(corrupted), 0644); err != nil {
+		t.Fatalf("write corrupted hosts: %v", err)
+	}
+
+	has, err := HasManagedHostsFile(tmpHosts)
+	if err != nil || !has {
+		t.Fatalf("expected detection of corrupted block, got (%v, %v)", has, err)
+	}
+
+	if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+		t.Fatalf("remove corrupted block failed: %v", err)
+	}
+
+	cleaned, _ := os.ReadFile(tmpHosts)
+	cleanedStr := string(cleaned)
+	if strings.Contains(cleanedStr, BeginManagedHostsMarker) || strings.Contains(cleanedStr, "partial-domain") {
+		t.Fatalf("corrupted block lines lingered after remove:\n%s", cleanedStr)
+	}
+	if !strings.Contains(cleanedStr, "127.0.0.1 localhost") {
+		t.Fatalf("user line before corrupted block was lost:\n%s", cleanedStr)
+	}
+}
+
+func TestRestoreWhenHostsMissingButBackupExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+	backupPath := HostsBackupPath(tmpHosts)
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	backupContent := "127.0.0.1 localhost\r\n10.0.0.99 server\r\n"
+	if err := os.WriteFile(backupPath, []byte(backupContent), 0644); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	// tmpHosts does NOT exist. RemoveManagedHostsFile should restore from backup!
+	if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+		t.Fatalf("RemoveManagedHostsFile failed: %v", err)
+	}
+
+	restored, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("hosts file not restored: %v", err)
+	}
+	if string(restored) != backupContent {
+		t.Fatalf("restored content mismatch:\ngot:\n%q\nwant:\n%q", string(restored), backupContent)
+	}
+	if _, err := os.Stat(backupPath); err == nil {
+		t.Fatalf("backup file should be retired after restoration")
+	}
+}
+
+

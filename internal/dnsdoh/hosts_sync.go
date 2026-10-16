@@ -18,6 +18,8 @@ import (
 const (
 	// DefaultHostsPath is the standard Windows system hosts file location.
 	DefaultHostsPath = `C:\Windows\System32\drivers\etc\hosts`
+	// DefaultHostsBackupPath is the backup location created before the first modification.
+	DefaultHostsBackupPath = `C:\Windows\System32\drivers\etc\hosts.dpibypass.bak`
 	// BeginManagedHostsMarker marks the start of the dpibypass managed hosts section.
 	BeginManagedHostsMarker = "# BEGIN DPIBYPASS MANAGED HOSTS"
 	// EndManagedHostsMarker marks the end of the dpibypass managed hosts section.
@@ -31,6 +33,67 @@ var (
 	hostsFilePath = DefaultHostsPath
 	flushDNSFunc  = defaultFlushDNS
 )
+
+// HostsBackupPath returns the backup file path corresponding to targetPath.
+func HostsBackupPath(targetPath string) string {
+	return targetPath + ".dpibypass.bak"
+}
+
+// HasManagedHosts reports whether the default system hosts file contains a dpibypass managed block.
+func HasManagedHosts() (bool, error) {
+	hostsFileMu.Lock()
+	targetPath := hostsFilePath
+	hostsFileMu.Unlock()
+	return HasManagedHostsFile(targetPath)
+}
+
+// HasManagedHostsFile reports whether the specified hosts file contains a dpibypass managed block.
+func HasManagedHostsFile(targetPath string) (bool, error) {
+	hostsFileMu.Lock()
+	defer hostsFileMu.Unlock()
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read hosts file %q: %w", targetPath, err)
+	}
+	return strings.Contains(string(data), BeginManagedHostsMarker), nil
+}
+
+// BackupHostsFile creates a backup of targetPath before the first modification.
+// If the backup file already exists, it is left untouched.
+// If targetPath already has a managed block, only the clean unmanaged lines are backed up.
+func BackupHostsFile(targetPath string) error {
+	backupPath := HostsBackupPath(targetPath)
+	if _, err := os.Stat(backupPath); err == nil {
+		return nil
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read hosts file for backup %q: %w", targetPath, err)
+	}
+
+	preservedLines, foundBlock := stripManagedBlockLines(string(data))
+	var cleanContent []byte
+	if foundBlock {
+		if len(preservedLines) > 0 {
+			cleanContent = []byte(strings.Join(preservedLines, "\r\n") + "\r\n")
+		}
+	} else {
+		cleanContent = data
+	}
+
+	if err := writeHostsFileAtomic(backupPath, cleanContent); err != nil {
+		return fmt.Errorf("write hosts backup %q: %w", backupPath, err)
+	}
+	return nil
+}
 
 // ManagedDomains lists the core Discord and Roblox domains synced via DoH on startup.
 var ManagedDomains = []string{
@@ -183,6 +246,11 @@ func SyncManagedHostsFile(ctx context.Context, targetPath string, dohResolver Re
 	hostsFileMu.Lock()
 	defer hostsFileMu.Unlock()
 
+	// 1. Back up original hosts file before the first modification.
+	if err := BackupHostsFile(targetPath); err != nil {
+		return fmt.Errorf("backup hosts file %q: %w", targetPath, err)
+	}
+
 	existingData, err := os.ReadFile(targetPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read hosts file %q: %w", targetPath, err)
@@ -214,13 +282,23 @@ func RemoveManagedHosts() error {
 }
 
 // RemoveManagedHostsFile removes the dpibypass managed section from the specified hosts file.
+// It is fully idempotent: running it when no managed block is present succeeds without changes.
+// When a managed block is cleaned, any associated backup file is safely retired.
 func RemoveManagedHostsFile(targetPath string) error {
 	hostsFileMu.Lock()
 	defer hostsFileMu.Unlock()
 
+	backupPath := HostsBackupPath(targetPath)
+
 	existingData, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// If target was missing but a backup exists, restore from backup
+			if bData, bErr := os.ReadFile(backupPath); bErr == nil {
+				_ = writeHostsFileAtomic(targetPath, bData)
+				_ = os.Remove(backupPath)
+				_ = flushDNSFunc()
+			}
 			return nil
 		}
 		return fmt.Errorf("read hosts file %q: %w", targetPath, err)
@@ -228,6 +306,10 @@ func RemoveManagedHostsFile(targetPath string) error {
 
 	preservedLines, foundBlock := stripManagedBlockLines(string(existingData))
 	if !foundBlock {
+		// No managed block in target hosts. Clean up lingering backup if present.
+		if _, bErr := os.Stat(backupPath); bErr == nil {
+			_ = os.Remove(backupPath)
+		}
 		return nil
 	}
 
@@ -240,6 +322,30 @@ func RemoveManagedHostsFile(targetPath string) error {
 		return fmt.Errorf("restore hosts file %q: %w", targetPath, err)
 	}
 
+	// Retire backup now that managed block has been successfully stripped
+	_ = os.Remove(backupPath)
+
+	_ = flushDNSFunc()
+	return nil
+}
+
+// RestoreHostsFromBackup restores the hosts file from its .dpibypass.bak backup if present.
+func RestoreHostsFromBackup(targetPath string) error {
+	hostsFileMu.Lock()
+	defer hostsFileMu.Unlock()
+
+	backupPath := HostsBackupPath(targetPath)
+	bData, err := os.ReadFile(backupPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read hosts backup %q: %w", backupPath, err)
+	}
+	if err := writeHostsFileAtomic(targetPath, bData); err != nil {
+		return fmt.Errorf("restore hosts file from backup %q: %w", targetPath, err)
+	}
+	_ = os.Remove(backupPath)
 	_ = flushDNSFunc()
 	return nil
 }

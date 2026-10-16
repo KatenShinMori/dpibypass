@@ -12,9 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"dpibypass/internal/app"
@@ -214,10 +212,15 @@ func executeRun(args []string) error {
 		return fmt.Errorf("initialize logger: %w", err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	// Detect any leftover managed block from a previous crash or unclean termination
+	if hasLeftover, lErr := dnsdoh.HasManagedHosts(); lErr == nil && hasLeftover {
+		logger.Warn("detected leftover managed hosts block in hosts file from a previous unclean shutdown or crash")
+	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	cleanupOnSignal := func() {
+		_ = dnsdoh.RemoveManagedHosts()
+	}
+	ctx, cancel := setupShutdownContext(cleanupOnSignal)
 	defer cancel()
 
 	if *durationFlag > 0 {
@@ -1394,7 +1397,7 @@ func executeRecover(args []string) error {
 	fmt.Println("=== dpibypass Unified Crash Recovery & Status ===")
 
 	// 1. Inspect & Recover Windows System Proxy
-	fmt.Println("\n[1/2] Windows Internet Settings (System Proxy):")
+	fmt.Println("\n[1/3] Windows Internet Settings (System Proxy):")
 	backupPath := *backupPathFlag
 	if backupPath == "" {
 		if resolved, err := sysproxy.DefaultBackupPath(); err == nil {
@@ -1462,7 +1465,7 @@ func executeRecover(args []string) error {
 	}
 
 	// 2. Inspect & Clean WinDivert Driver State
-	fmt.Println("\n[2/2] WinDivert Kernel Driver & Service State:")
+	fmt.Println("\n[2/3] WinDivert Kernel Driver & Service State:")
 	driverSt := divert.QueryDriverStatus()
 	fmt.Printf("  Platform Support : %v\n", driverSt.Supported)
 	fmt.Printf("  Admin Elevation  : %v\n", driverSt.Elevated)
@@ -1489,11 +1492,32 @@ func executeRecover(args []string) error {
 		fmt.Println("  Action           : Driver service is clean. No action needed.")
 	}
 
-	if !checkOnly {
+	// 3. Inspect & Clean Windows Hosts File Managed Block
+	fmt.Println("\n[3/3] Windows Hosts File Managed Block:")
+	hasLeftover, hostsErr := dnsdoh.HasManagedHosts()
+	if hostsErr != nil {
+		fmt.Printf("  Hosts Status     : Error inspecting hosts file: %v\n", hostsErr)
+	} else if hasLeftover {
+		fmt.Println("  Hosts Status     : Lingering managed block DETECTED")
+	} else {
+		fmt.Println("  Hosts Status     : Clean (no managed block found)")
+	}
+
+	if checkOnly {
+		if hasLeftover {
+			fmt.Println("  Action           : Managed entries present (run 'dpibypass recover' without --check-only to remove)")
+		} else {
+			fmt.Println("  Action           : Hosts file is clean. No action needed.")
+		}
+	} else {
 		if rmErr := dnsdoh.RemoveManagedHosts(); rmErr != nil {
 			fmt.Printf("  Hosts Cleanup    : Warning: %v\n", rmErr)
 		} else {
-			fmt.Println("  Hosts Cleanup    : Clean (dpibypass managed hosts entries removed)")
+			if hasLeftover {
+				fmt.Println("  Hosts Cleanup    : SUCCESS (dpibypass managed hosts entries removed cleanly)")
+			} else {
+				fmt.Println("  Hosts Cleanup    : Clean (already clean, no action needed)")
+			}
 		}
 	}
 
