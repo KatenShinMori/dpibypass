@@ -90,6 +90,74 @@ func (p PacketConfig) AutoLearnOrDefault() bool {
 	return *p.AutoLearn
 }
 
+// HostsSyncConfig defines domain names to synchronize to the Windows hosts file.
+type HostsSyncConfig struct {
+	Domains []string `json:"domains,omitempty"`
+}
+
+// DefaultHostsSyncDomains returns the verified Discord and Roblox domain names
+// synced to the Windows hosts file by default.
+func DefaultHostsSyncDomains() []string {
+	return []string{
+		// Discord
+		"discord.com",
+		"www.discord.com",
+		"updates.discord.com",
+		"gateway.discord.gg",
+		"cdn.discordapp.com",
+		"media.discordapp.net",
+		"images-ext-1.discordapp.net",
+		"images-ext-2.discordapp.net",
+		"dl.discordapp.net",
+		"dl2.discordapp.net",
+		"status.discord.com",
+		"discord.gg",
+		"discordapp.com",
+		"discordapp.net",
+		"discord.media",
+		"latency.discord.media",
+		"ptb.discord.com",
+		"canary.discord.com",
+		"remote-auth-gateway.discord.gg",
+		"status.discordapp.com",
+		"router.discordapp.net",
+		"api.discord.com",
+		"cdn.discord.com",
+		// Roblox
+		"roblox.com",
+		"www.roblox.com",
+		"auth.roblox.com",
+		"apis.roblox.com",
+		"users.roblox.com",
+		"games.roblox.com",
+		"assetdelivery.roblox.com",
+		"economy.roblox.com",
+		"thumbnails.roblox.com",
+		"presence.roblox.com",
+		"clientsettings.roblox.com",
+		"clientsettingscdn.roblox.com",
+		"ecs.roblox.com",
+		"client-telemetry.roblox.com",
+		"realtime.roblox.com",
+		"lms.roblox.com",
+		"friends.roblox.com",
+		"groups.roblox.com",
+		"catalog.roblox.com",
+		"avatar.roblox.com",
+		"chat.roblox.com",
+		"accountsettings.roblox.com",
+		"locale.roblox.com",
+	}
+}
+
+// DomainsOrDefault returns the configured domain list, or DefaultHostsSyncDomains if empty.
+func (h HostsSyncConfig) DomainsOrDefault() []string {
+	if len(h.Domains) == 0 {
+		return DefaultHostsSyncDomains()
+	}
+	return h.Domains
+}
+
 // Config represents the top-level dpibypass configuration structure.
 type Config struct {
 	Version        int                      `json:"version"`
@@ -103,6 +171,7 @@ type Config struct {
 	Limits         LimitsConfig             `json:"limits"`
 	LogLevel       string                   `json:"log_level"`
 	Packet         PacketConfig             `json:"packet,omitempty"`
+	HostsSync      HostsSyncConfig          `json:"hosts_sync,omitempty"`
 }
 
 // DoHConfig defines optional DNS-over-HTTPS settings.
@@ -202,6 +271,9 @@ func DefaultConfig() *Config {
 			InterceptDNS:       &interceptDNS,
 			AutoLearn:          &autoLearn,
 			AutoLearnPath:      "autolearn.json",
+		},
+		HostsSync: HostsSyncConfig{
+			Domains: DefaultHostsSyncDomains(),
 		},
 	}
 }
@@ -415,6 +487,25 @@ func (c *Config) Validate() error {
 	}
 	if c.Packet.InterPacketDelayMS < 0 || c.Packet.InterPacketDelayMS > 10000 {
 		return fmt.Errorf("packet.inter_packet_delay_ms %d out of bounds (0..10000 ms)", c.Packet.InterPacketDelayMS)
+	}
+
+	// Validate hosts_sync domains
+	if len(c.HostsSync.Domains) > 0 {
+		for i, d := range c.HostsSync.Domains {
+			td := strings.TrimSpace(d)
+			if td == "" {
+				return fmt.Errorf("hosts_sync.domains[%d] is empty", i)
+			}
+			if strings.ContainsAny(td, " \t\r\n/\\:#") {
+				return fmt.Errorf("hosts_sync.domains[%d] %q contains invalid characters or whitespace", i, d)
+			}
+			if strings.Contains(td, "*") {
+				return fmt.Errorf("hosts_sync.domains[%d] %q: wildcards are not supported in the hosts file; use literal domain names", i, d)
+			}
+			if len(td) > 253 {
+				return fmt.Errorf("hosts_sync.domains[%d] %q exceeds maximum domain length (253 characters)", i, d)
+			}
+		}
 	}
 
 	return nil

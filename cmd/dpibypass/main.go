@@ -486,7 +486,8 @@ func executeRunPacket(ctx context.Context, cfg *config.Config, logger *slog.Logg
 				dohResolver = r
 			}
 		}
-		if syncErr := dnsdoh.SyncManagedHosts(ctx, dohResolver, logger); syncErr != nil {
+		hostsSyncDomains := cfg.HostsSync.DomainsOrDefault()
+		if syncErr := dnsdoh.SyncManagedHostsWithDomains(ctx, dohResolver, logger, hostsSyncDomains); syncErr != nil {
 			logger.Warn("failed to sync DoH IPs to Windows hosts file", "error", syncErr)
 		} else {
 			defer func() {
@@ -514,15 +515,9 @@ func executeRunPacket(ctx context.Context, cfg *config.Config, logger *slog.Logg
 				logger.Info("flushed Windows DNS cache successfully", "output", strings.TrimSpace(string(out)))
 			}
 			time.Sleep(300 * time.Millisecond)
-			prewarmDomains := []string{
-				"discord.com",
-				"updates.discord.com",
-				"gateway.discord.gg",
-				"cdn.discordapp.com",
-				"media.discordapp.net",
-				"status.discord.com",
-				"dl.discordapp.net",
-				"www.roblox.com",
+			prewarmDomains := cfg.HostsSync.DomainsOrDefault()
+			if len(prewarmDomains) > 10 {
+				prewarmDomains = prewarmDomains[:10]
 			}
 			for _, d := range prewarmDomains {
 				if ctx.Err() != nil {

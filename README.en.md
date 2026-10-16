@@ -135,6 +135,15 @@ The default configuration is optimized for daily use:
     "desync_http": true,
     "auto_learn": true
   },
+  "hosts_sync": {
+    "domains": [
+      "discord.com",
+      "updates.discord.com",
+      "gateway.discord.gg",
+      "cdn.discordapp.com",
+      "www.roblox.com"
+    ]
+  },
   "doh": {
     "enabled": true,
     "endpoints": [
@@ -144,6 +153,8 @@ The default configuration is optimized for daily use:
   }
 }
 ```
+
+- `hosts_sync.domains`: Configures the list of literal domain names resolved via DoH at startup and maintained inside the `# BEGIN/END DPIBYPASS MANAGED HOSTS` block in `C:\Windows\System32\drivers\etc\hosts`. When omitted or empty, the built-in Discord and Roblox domain lists are used as defaults. Validated with `config validate` (wildcards like `*` are not supported in hosts files; provide literal hostnames).
 
 ---
 

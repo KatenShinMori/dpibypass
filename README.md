@@ -135,6 +135,15 @@ Varsayılan yapılandırma günlük kullanım için optimize edilmiştir:
     "desync_http": true,
     "auto_learn": true
   },
+  "hosts_sync": {
+    "domains": [
+      "discord.com",
+      "updates.discord.com",
+      "gateway.discord.gg",
+      "cdn.discordapp.com",
+      "www.roblox.com"
+    ]
+  },
   "doh": {
     "enabled": true,
     "endpoints": [
@@ -144,6 +153,8 @@ Varsayılan yapılandırma günlük kullanım için optimize edilmiştir:
   }
 }
 ```
+
+- `hosts_sync.domains`: Başlangıçta DoH üzerinden temiz IP adresleri çözülecek ve Windows `hosts` dosyasındaki `# BEGIN/END DPIBYPASS MANAGED HOSTS` bloğuna işlenecek alan adlarıdır. Belirtilmediğinde varsayılan Discord ve Roblox alan adı listesi kullanılır. `config validate` ile doğrulanabilir (joker karakter `*` desteklenmez; doğrudan alan adı yazılmalıdır).
 
 ---
 

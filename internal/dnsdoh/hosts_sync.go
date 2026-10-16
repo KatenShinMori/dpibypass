@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"dpibypass/internal/config"
 )
 
 const (
@@ -96,56 +98,7 @@ func BackupHostsFile(targetPath string) error {
 }
 
 // ManagedDomains lists the core Discord and Roblox domains synced via DoH on startup.
-var ManagedDomains = []string{
-	// Discord
-	"discord.com",
-	"www.discord.com",
-	"updates.discord.com",
-	"gateway.discord.gg",
-	"cdn.discordapp.com",
-	"media.discordapp.net",
-	"images-ext-1.discordapp.net",
-	"images-ext-2.discordapp.net",
-	"dl.discordapp.net",
-	"dl2.discordapp.net",
-	"status.discord.com",
-	"discord.gg",
-	"discordapp.com",
-	"discordapp.net",
-	"discord.media",
-	"latency.discord.media",
-	"ptb.discord.com",
-	"canary.discord.com",
-	"remote-auth-gateway.discord.gg",
-	"status.discordapp.com",
-	"router.discordapp.net",
-	"api.discord.com",
-	"cdn.discord.com",
-	// Roblox
-	"roblox.com",
-	"www.roblox.com",
-	"auth.roblox.com",
-	"apis.roblox.com",
-	"users.roblox.com",
-	"games.roblox.com",
-	"assetdelivery.roblox.com",
-	"economy.roblox.com",
-	"thumbnails.roblox.com",
-	"presence.roblox.com",
-	"clientsettings.roblox.com",
-	"clientsettingscdn.roblox.com",
-	"ecs.roblox.com",
-	"client-telemetry.roblox.com",
-	"realtime.roblox.com",
-	"lms.roblox.com",
-	"friends.roblox.com",
-	"groups.roblox.com",
-	"catalog.roblox.com",
-	"avatar.roblox.com",
-	"chat.roblox.com",
-	"accountsettings.roblox.com",
-	"locale.roblox.com",
-}
+var ManagedDomains = config.DefaultHostsSyncDomains()
 
 // FallbackDomainIPs provides verified Cloudflare Anycast IPv4 addresses if a startup DoH query times out.
 var FallbackDomainIPs = map[string]string{
@@ -182,18 +135,33 @@ func defaultFlushDNS() error {
 	return exec.Command("ipconfig", "/flushdns").Run()
 }
 
-// SyncManagedHosts resolves live IPv4 (A) records via dohResolver for all core Discord and Roblox
-// domains, writes them into the managed section of the Windows hosts file, and flushes the OS DNS cache.
+// SyncManagedHosts resolves live IPv4 (A) records via dohResolver for default domains,
+// writes them into the managed section of the Windows hosts file, and flushes the OS DNS cache.
 func SyncManagedHosts(ctx context.Context, dohResolver Resolver, logger *slog.Logger) error {
+	return SyncManagedHostsWithDomains(ctx, dohResolver, logger, nil)
+}
+
+// SyncManagedHostsWithDomains resolves live IPv4 (A) records via dohResolver for the given domains,
+// writes them into the managed section of the Windows hosts file, and flushes the OS DNS cache.
+func SyncManagedHostsWithDomains(ctx context.Context, dohResolver Resolver, logger *slog.Logger, domains []string) error {
 	hostsFileMu.Lock()
 	targetPath := hostsFilePath
 	hostsFileMu.Unlock()
-	return SyncManagedHostsFile(ctx, targetPath, dohResolver, logger)
+	return SyncManagedHostsFileWithDomains(ctx, targetPath, dohResolver, logger, domains)
 }
 
 // SyncManagedHostsFile resolves live IPv4 (A) records via dohResolver and atomically updates
-// the managed section in the specified hosts file path.
+// the managed section in the specified hosts file path using default domains.
 func SyncManagedHostsFile(ctx context.Context, targetPath string, dohResolver Resolver, logger *slog.Logger) error {
+	return SyncManagedHostsFileWithDomains(ctx, targetPath, dohResolver, logger, nil)
+}
+
+// SyncManagedHostsFileWithDomains resolves live IPv4 (A) records via dohResolver for the given domains
+// and atomically updates the managed section in the specified hosts file path.
+func SyncManagedHostsFileWithDomains(ctx context.Context, targetPath string, dohResolver Resolver, logger *slog.Logger, domains []string) error {
+	if len(domains) == 0 {
+		domains = ManagedDomains
+	}
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
@@ -201,11 +169,11 @@ func SyncManagedHostsFile(ctx context.Context, targetPath string, dohResolver Re
 		ctx = context.Background()
 	}
 
-	resolved := make([]string, len(ManagedDomains))
+	resolved := make([]string, len(domains))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
 
-	for i, domain := range ManagedDomains {
+	for i, domain := range domains {
 		wg.Add(1)
 		go func(idx int, d string) {
 			defer wg.Done()
@@ -233,7 +201,7 @@ func SyncManagedHostsFile(ctx context.Context, targetPath string, dohResolver Re
 	var managedLines []string
 	managedLines = append(managedLines, BeginManagedHostsMarker)
 	entriesCount := 0
-	for i, domain := range ManagedDomains {
+	for i, domain := range domains {
 		ipStr := resolved[i]
 		if ipStr == "" {
 			continue

@@ -517,4 +517,44 @@ func TestRestoreWhenHostsMissingButBackupExists(t *testing.T) {
 	}
 }
 
+func TestSyncManagedHostsWithCustomDomains(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	resolver := &mockHostsResolver{
+		lookupFn: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("1.2.3.4")}, nil
+		},
+	}
+
+	customDomains := []string{"custom-target.internal", "my-service.net"}
+	if err := SyncManagedHostsFileWithDomains(context.Background(), tmpHosts, resolver, nil, customDomains); err != nil {
+		t.Fatalf("SyncManagedHostsFileWithDomains failed: %v", err)
+	}
+
+	data, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read synced: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "1.2.3.4 custom-target.internal") || !strings.Contains(content, "1.2.3.4 my-service.net") {
+		t.Fatalf("custom domains not written to hosts:\n%s", content)
+	}
+	// Verify discord.com is NOT present since custom domains were provided
+	if strings.Contains(content, "discord.com") {
+		t.Fatalf("default domain discord.com should not be present when custom list is specified:\n%s", content)
+	}
+}
+
+
 

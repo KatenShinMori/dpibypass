@@ -955,6 +955,61 @@ func TestRootConfigFilesValid(t *testing.T) {
 			if len(cfg.DoH.Endpoints) < 2 {
 				t.Errorf("%s: expected at least 2 DoH endpoints (Cloudflare and Google), got %d", filename, len(cfg.DoH.Endpoints))
 			}
+			if len(cfg.HostsSync.DomainsOrDefault()) == 0 {
+				t.Errorf("%s: expected non-empty hosts_sync domains", filename)
+			}
 		}
 	}
 }
+
+func TestHostsSyncConfigValidation(t *testing.T) {
+	t.Run("default domains non-empty", func(t *testing.T) {
+		cfg := DefaultConfig()
+		domains := cfg.HostsSync.DomainsOrDefault()
+		if len(domains) == 0 {
+			t.Fatal("expected default hosts_sync domains to be non-empty")
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("DefaultConfig validation failed: %v", err)
+		}
+	})
+
+	t.Run("custom valid domains pass", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.HostsSync.Domains = []string{"custom.domain.org", "api.service.io"}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("expected valid custom domains to pass, got: %v", err)
+		}
+	})
+
+	t.Run("wildcard domain rejected", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.HostsSync.Domains = []string{"*.discord.com"}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for wildcard in hosts_sync.domains, got nil")
+		}
+		if !strings.Contains(err.Error(), "wildcards are not supported") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("whitespace in domain rejected", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.HostsSync.Domains = []string{"invalid domain.com"}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for whitespace in domain, got nil")
+		}
+	})
+
+	t.Run("empty string domain rejected", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.HostsSync.Domains = []string{""}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for empty domain string, got nil")
+		}
+	})
+}
+
