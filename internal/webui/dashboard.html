@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dpibypass &mdash; Engine Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-green: #10b981;
+      --accent-blue: #38bdf8;
+      --accent-yellow: #f59e0b;
+      --accent-red: #ef4444;
+      --btn-bg: #2563eb;
+      --btn-hover: #1d4ed8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .title-group h1 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .title-group p {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .badge-group {
+      display: flex;
+      gap: 10px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+    }
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .badge.green .badge-dot { background: var(--accent-green); }
+    .badge.green { color: var(--accent-green); border-color: rgba(16, 185, 129, 0.3); }
+    .badge.yellow .badge-dot { background: var(--accent-yellow); }
+    .badge.yellow { color: var(--accent-yellow); border-color: rgba(245, 158, 11, 0.3); }
+    .badge.blue { color: var(--accent-blue); border-color: rgba(56, 189, 248, 0.3); }
+
+    .control-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .control-info h3 {
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+    .control-info p {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 600px;
+    }
+    .btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-pause {
+      background: #dc2626;
+      color: white;
+    }
+    .btn-pause:hover { background: #b91c1c; }
+    .btn-resume {
+      background: #059669;
+      color: white;
+    }
+    .btn-resume:hover { background: #047857; }
+
+    .strategy-banner {
+      background: rgba(56, 189, 248, 0.05);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-bottom: 24px;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .strategy-label {
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .strategy-val {
+      font-weight: 600;
+      color: var(--accent-blue);
+      font-family: monospace;
+      font-size: 15px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      transition: transform 0.15s ease;
+    }
+    .stat-card:hover {
+      border-color: #475569;
+    }
+    .stat-title {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+    .stat-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-card.highlight .stat-value {
+      color: var(--accent-green);
+    }
+    .stat-card.amber .stat-value {
+      color: var(--accent-yellow);
+    }
+
+    .table-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .table-card h3 {
+      font-size: 16px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .data-table th, .data-table td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .data-table th {
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    .data-table tr:last-child td {
+      border-bottom: none;
+    }
+    .stage-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .stage-badge.s1 { background: rgba(56, 189, 248, 0.2); color: var(--accent-blue); }
+    .stage-badge.s2 { background: rgba(245, 158, 11, 0.2); color: var(--accent-yellow); }
+    .stage-badge.s3 { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); }
+
+    footer {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title-group">
+        <h1>dpibypass Engine</h1>
+        <p>Wire-Level Packet Desynchronization &amp; Bypass Monitor</p>
+      </div>
+      <div class="badge-group">
+        <span class="badge blue" id="mode-badge">MODE: <span id="mode-val">PACKET</span></span>
+        <span class="badge green" id="driver-badge"><span class="badge-dot"></span><span id="driver-val">RUNNING</span></span>
+      </div>
+    </header>
+
+    <div class="strategy-banner">
+      <span class="strategy-label">Active Evasion Strategy</span>
+      <span class="strategy-val" id="strategy-val">Loading...</span>
+    </div>
+
+    <div class="control-card">
+      <div class="control-info">
+        <h3>Anti-Cheat Safe Mode (Game Compatibility)</h3>
+        <p>Temporarily stops the WinDivert kernel driver service so you can launch Easy Anti-Cheat / BattlEye / Vanguard games without closing dpibypass. Click resume when finished playing.</p>
+      </div>
+      <button class="btn btn-pause" id="toggle-btn" onclick="toggleDriver()">Pause Driver (Safe Mode)</button>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-title">Total Intercepted</div>
+        <div class="stat-value" id="val-recv">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">Fast-Path Pass-Through</div>
+        <div class="stat-value" id="val-fastpath">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">QUIC Dropped (UDP/443)</div>
+        <div class="stat-value" id="val-quic">0</div>
+      </div>
+      <div class="stat-card highlight">
+        <div class="stat-title">Candidate Handshakes</div>
+        <div class="stat-value" id="val-candidates">0</div>
+      </div>
+      <div class="stat-card highlight">
+        <div class="stat-title">Fake Packets Injected</div>
+        <div class="stat-value" id="val-fake">0</div>
+      </div>
+      <div class="stat-card highlight">
+        <div class="stat-title">Out-of-Order Segments Split</div>
+        <div class="stat-value" id="val-split">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">Pass-Through Fallbacks</div>
+        <div class="stat-value" id="val-fallbacks">0</div>
+      </div>
+      <div class="stat-card highlight">
+        <div class="stat-title">DNS Intercepted (UDP/53)</div>
+        <div class="stat-value" id="val-dns-intercepted">0</div>
+      </div>
+      <div class="stat-card highlight">
+        <div class="stat-title">DNS Resolved (DoH)</div>
+        <div class="stat-value" id="val-dns-resolved">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">DNS Fallbacks</div>
+        <div class="stat-value" id="val-dns-fallbacks">0</div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-title">Retransmissions Detected</div>
+        <div class="stat-value" id="val-retransmissions">0</div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-title">Strategy Escalations</div>
+        <div class="stat-value" id="val-escalations">0</div>
+      </div>
+      <div class="stat-card highlight">
+        <div class="stat-title">Domains Auto-Learned</div>
+        <div class="stat-value" id="val-domains-learned">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">Send Errors</div>
+        <div class="stat-value" id="val-errors">0</div>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <h3>
+        <span>Self-Healing Auto-Hostlist</span>
+        <span style="font-size: 12px; color: var(--text-muted); font-weight: normal;">Live Learned Strategy Mappings</span>
+      </h3>
+      <table class="data-table" id="learned-table">
+        <thead>
+          <tr>
+            <th>Domain</th>
+            <th>Stage</th>
+            <th>Evasion Strategy Details</th>
+          </tr>
+        </thead>
+        <tbody id="learned-tbody">
+          <tr><td colspan="3" style="color: var(--text-muted); text-align: center; padding: 20px;">No domains escalated yet. Engine will auto-learn on ISP block detection.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <footer>
+      Loopback only (127.0.0.1) &bull; Zero payload logging &bull; RFC 793 TCP Wire Engine
+    </footer>
+  </div>
+
+  <script>
+    let isPaused = false;
+
+    function escapeHTML(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    async function fetchStats() {
+      try {
+        const resp = await fetch('/api/stats');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        // Mode badge
+        document.getElementById('mode-val').textContent = (data.mode || 'PACKET').toUpperCase();
+        document.getElementById('strategy-val').textContent = data.strategy || 'TTL 5 + OOO Split';
+
+        // Driver badge & toggle button
+        isPaused = !!data.is_paused;
+        const driverVal = document.getElementById('driver-val');
+        const driverBadge = document.getElementById('driver-badge');
+        const toggleBtn = document.getElementById('toggle-btn');
+
+        if (isPaused) {
+          driverVal.textContent = 'PAUSED (SAFE MODE)';
+          driverBadge.className = 'badge yellow';
+          toggleBtn.className = 'btn btn-resume';
+          toggleBtn.textContent = 'Resume Driver';
+        } else {
+          driverVal.textContent = data.driver_state || 'RUNNING';
+          driverBadge.className = 'badge green';
+          toggleBtn.className = 'btn btn-pause';
+          toggleBtn.textContent = 'Pause Driver (Safe Mode)';
+        }
+
+        // Stats counters
+        if (data.stats) {
+          document.getElementById('val-recv').textContent = (data.stats.packets_recv || 0).toLocaleString();
+          document.getElementById('val-fastpath').textContent = (data.stats.tcp_fast_path || 0).toLocaleString();
+          document.getElementById('val-quic').textContent = (data.stats.quic_dropped || 0).toLocaleString();
+          document.getElementById('val-candidates').textContent = (data.stats.candidate_handshakes || 0).toLocaleString();
+          document.getElementById('val-fake').textContent = (data.stats.fake_packets_injected || 0).toLocaleString();
+          document.getElementById('val-split').textContent = (data.stats.packets_split || 0).toLocaleString();
+          document.getElementById('val-fallbacks').textContent = (data.stats.fallbacks || 0).toLocaleString();
+          document.getElementById('val-dns-intercepted').textContent = (data.stats.dns_intercepted || 0).toLocaleString();
+          document.getElementById('val-dns-resolved').textContent = (data.stats.dns_resolved_doh || 0).toLocaleString();
+          document.getElementById('val-dns-fallbacks').textContent = (data.stats.dns_fallbacks || 0).toLocaleString();
+          document.getElementById('val-retransmissions').textContent = (data.stats.retransmissions_detected || 0).toLocaleString();
+          document.getElementById('val-escalations').textContent = (data.stats.strategy_escalations || 0).toLocaleString();
+          document.getElementById('val-domains-learned').textContent = (data.stats.domains_auto_learned || 0).toLocaleString();
+          document.getElementById('val-errors').textContent = (data.stats.send_errors || 0).toLocaleString();
+        }
+
+        // Learned domains table
+        const tbody = document.getElementById('learned-tbody');
+        if (data.learned_domains && data.learned_domains.length > 0) {
+          tbody.innerHTML = data.learned_domains.map(d => {
+            const sClass = d.stage === 1 ? 's1' : (d.stage === 2 ? 's2' : 's3');
+            const safeDomain = escapeHTML(d.domain);
+            const safeStrategy = escapeHTML(d.strategy);
+            return `<tr>
+              <td style="font-family: monospace; font-weight: 600;">${safeDomain}</td>
+              <td><span class="stage-badge ${sClass}">Stage ${d.stage}</span></td>
+              <td style="color: var(--text-muted); font-family: monospace;">${safeStrategy}</td>
+            </tr>`;
+          }).join('');
+        } else {
+          tbody.innerHTML = `<tr><td colspan="3" style="color: var(--text-muted); text-align: center; padding: 20px;">No domains escalated yet. Engine will auto-learn on ISP block detection.</td></tr>`;
+        }
+      } catch (e) {
+        // Network or server closed
+      }
+    }
+
+    async function toggleDriver() {
+      const endpoint = isPaused ? '/api/driver/resume' : '/api/driver/pause';
+      try {
+        const resp = await fetch(endpoint, { method: 'POST' });
+        if (resp.ok) {
+          await fetchStats();
+        }
+      } catch (e) {
+        console.error('Failed to toggle driver:', e);
+      }
+    }
+
+    // Refresh stats every 1 second
+    fetchStats();
+    setInterval(fetchStats, 1000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+# Binaries and compiled artifacts
+*.exe
+*.dll
+*.sys
+*.exe~
+/dpibypass
+bin/
+
+# Temporary and backup files
+*.old
+*.bak
+*.tmp
+proxy-backup.json
+autolearn.json
+autolearn.json.*.tmp
+.gotmp/
+
+# Diagnostic logs and reports
+*.log
+live-test-report*.txt
+live-test-report.txt
+
+# Test artifacts and coverage
+*.test
+*.out
+coverage.txt
+
+# IDE and OS metadata
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

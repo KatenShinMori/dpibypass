@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "mode": "packet",
+  "listen": "127.0.0.1:1080",
+  "default_profile": "packet-default",
+  "doh": {
+    "enabled": true,
+    "fallback_system": true,
+    "endpoints": [
+      {
+        "url": "https://1.1.1.1/dns-query",
+        "bootstrap_ips": ["1.1.1.1", "1.0.0.1"]
+      },
+      {
+        "url": "https://cloudflare-dns.com/dns-query",
+        "bootstrap_ips": ["1.1.1.1", "1.0.0.1"]
+      },
+      {
+        "url": "https://dns.google/dns-query",
+        "bootstrap_ips": ["8.8.8.8", "8.8.4.4"]
+      }
+    ]
+  },
+  "profiles": {
+    "none": {
+      "type": "none"
+    },
+    "packet-default": {
+      "type": "packet"
+    },
+    "packet-discord": {
+      "type": "packet"
+    }
+  },
+  "domain_rules": [
+    {
+      "match": "cloudflare-dns.com",
+      "profile": "none"
+    },
+    {
+      "match": "dns.google",
+      "profile": "none"
+    },
+    {
+      "match": "one.one.one.one",
+      "profile": "none"
+    },
+    {
+      "match": "updates.discord.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discord.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discord.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discord.gg",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discord.gg",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discordapp.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discordapp.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discordapp.net",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discordapp.net",
+      "profile": "packet-default"
+    },
+    {
+      "match": "dl.discordapp.net",
+      "profile": "packet-default"
+    },
+    {
+      "match": "gateway.discord.gg",
+      "profile": "packet-default"
+    },
+    {
+      "match": "cdn.discordapp.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "dl2.discordapp.net",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.dl2.discordapp.net",
+      "profile": "packet-default"
+    },
+    {
+      "match": "stable.dl2.discordapp.net",
+      "profile": "packet-default"
+    },
+    {
+      "match": "router.discordapp.net",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discordcdn.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discordcdn.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "status.discord.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discordstatus.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discordstatus.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discord.gift",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discord.gift",
+      "profile": "packet-default"
+    },
+    {
+      "match": "dis.gd",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.dis.gd",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discord.media",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discord.media",
+      "profile": "packet-default"
+    },
+    {
+      "match": "latency.discord.media",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discord.co",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discord.co",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discord.dev",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discord.dev",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discord.new",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discord.new",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discordapp.io",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discordapp.io",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discordactivities.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discordactivities.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "discord-activities.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.discord-activities.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "www.roblox.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.roblox.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "roblox.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "*.rbxcdn.com",
+      "profile": "packet-default"
+    },
+    {
+      "match": "rbxcdn.com",
+      "profile": "packet-default"
+    }
+  ],
+  "packet": {
+    "intercept_dns": true,
+    "auto_learn": true,
+    "fake_mode": "ttl",
+    "fake_ttl": 4,
+    "fake_sni": "www.example.com",
+    "fake_delay_ms": 0,
+    "split_offset": "sni-mid",
+    "inter_packet_delay_ms": 0,
+    "drop_quic": true,
+    "desync_http": true
+  },
+  "timeouts": {
+    "dial_ms": 8000,
+    "initial_inspection_ms": 1000,
+    "idle_s": 120
+  },
+  "limits": {
+    "max_connections": 1000,
+    "max_initial_bytes": 65536
+  },
+  "log_level": "info"
+}
