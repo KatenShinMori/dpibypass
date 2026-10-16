@@ -22,8 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened `.gitignore` to strictly exclude driver binaries, built executables, logs, and local configs.
 
 ### Fixed
-- Hardened hosts file management: isolated strictly to managed block `# BEGIN/END DPIBYPASS MANAGED HOSTS`.
-- Idempotent `recover` command for hosts file, sysproxy, and WinDivert service cleanup.
+- Hardened hosts file management: in-place replacement strictly isolated to managed block `# BEGIN/END DPIBYPASS MANAGED HOSTS` preserving surrounding content.
+- Idempotent `recover` command for hosts file, sysproxy, and WinDivert service cleanup, with automatic restoration if hosts is empty.
+- WinDivert driver service cleanup on console window close and system shutdown signals.
+- Robust handling of Windows Read-Only file attribute on hosts file during sync and recovery.
+- Strict RFC domain validation for `hosts_sync.domains` (preventing IP addresses, consecutive dots, and invalid labels).
 
 ## [1.0.0] - 2026-10-15
 

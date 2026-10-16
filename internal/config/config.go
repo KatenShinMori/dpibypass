@@ -505,6 +505,27 @@ func (c *Config) Validate() error {
 			if len(td) > 253 {
 				return fmt.Errorf("hosts_sync.domains[%d] %q exceeds maximum domain length (253 characters)", i, d)
 			}
+			if net.ParseIP(td) != nil {
+				return fmt.Errorf("hosts_sync.domains[%d] %q is an IP address; hosts_sync requires domain names", i, d)
+			}
+			if strings.HasPrefix(td, ".") || strings.HasSuffix(td, ".") {
+				return fmt.Errorf("hosts_sync.domains[%d] %q has leading or trailing dot", i, d)
+			}
+			if strings.HasPrefix(td, "-") || strings.HasSuffix(td, "-") {
+				return fmt.Errorf("hosts_sync.domains[%d] %q has leading or trailing hyphen", i, d)
+			}
+			labels := strings.Split(td, ".")
+			for _, label := range labels {
+				if label == "" {
+					return fmt.Errorf("hosts_sync.domains[%d] %q contains empty label (consecutive dots)", i, d)
+				}
+				if len(label) > 63 {
+					return fmt.Errorf("hosts_sync.domains[%d] label %q in %q exceeds 63 characters", i, label, d)
+				}
+				if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+					return fmt.Errorf("hosts_sync.domains[%d] label %q in %q has leading or trailing hyphen", i, label, d)
+				}
+			}
 		}
 	}
 

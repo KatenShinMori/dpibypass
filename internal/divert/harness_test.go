@@ -3698,6 +3698,10 @@ func TestHarness_RetransmissionEscalationLadder(t *testing.T) {
 func TestHarness_LearnedDomainPersistence(t *testing.T) {
 	tempDir := t.TempDir()
 	persistFile := filepath.Join(tempDir, "autolearn.json")
+	t.Cleanup(func() {
+		_ = os.Remove(persistFile)
+		time.Sleep(30 * time.Millisecond)
+	})
 
 	// Phase A: Learn domain at Stage 2 using first harness
 	al1 := NewAutoLearner(persistFile, true)

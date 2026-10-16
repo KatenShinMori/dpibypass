@@ -556,5 +556,221 @@ func TestSyncManagedHostsWithCustomDomains(t *testing.T) {
 	}
 }
 
+func TestHostsBlockAddUpdateRemoveInPlace(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	// Initial file with custom lines before and after
+	initialHeader := "# Custom corporate hosts header\r\n127.0.0.1 localhost\r\n::1 localhost\r\n"
+	initialFooter := "# Custom trailing server entries\r\n192.168.1.100 nas.local\r\n10.0.0.50 devbox\r\n"
+	initialContent := initialHeader + initialFooter
+
+	if err := os.WriteFile(tmpHosts, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("write initial hosts: %v", err)
+	}
+
+	// 1. ADD: First sync adds managed block
+	resolver1 := &mockHostsResolver{
+		lookupFn: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("162.159.135.232")}, nil
+		},
+	}
+	if err := SyncManagedHostsFileWithDomains(context.Background(), tmpHosts, resolver1, nil, []string{"discord.com"}); err != nil {
+		t.Fatalf("first sync (add) failed: %v", err)
+	}
+
+	data1, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read synced 1: %v", err)
+	}
+	content1 := string(data1)
+	if !strings.Contains(content1, "162.159.135.232 discord.com") {
+		t.Fatalf("managed block not added:\n%s", content1)
+	}
+
+	// 2. UPDATE IN PLACE: Now insert a custom line AFTER the managed block to test in-place update
+	withSurrounding := initialHeader + BeginManagedHostsMarker + "\r\n162.159.135.232 discord.com\r\n" + EndManagedHostsMarker + "\r\n" + initialFooter
+	if err := os.WriteFile(tmpHosts, []byte(withSurrounding), 0644); err != nil {
+		t.Fatalf("write withSurrounding: %v", err)
+	}
+
+	// Perform an update sync with new IP
+	resolver2 := &mockHostsResolver{
+		lookupFn: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("162.159.99.99")}, nil
+		},
+	}
+	if err := SyncManagedHostsFileWithDomains(context.Background(), tmpHosts, resolver2, nil, []string{"discord.com"}); err != nil {
+		t.Fatalf("second sync (update) failed: %v", err)
+	}
+
+	data2, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read synced 2: %v", err)
+	}
+	content2 := string(data2)
+
+	// Verify new IP is in the managed block
+	if !strings.Contains(content2, "162.159.99.99 discord.com") {
+		t.Fatalf("managed block not updated with new IP:\n%s", content2)
+	}
+
+	// CRUCIAL: Verify that initialFooter is STILL AFTER the managed block!
+	endIdx := strings.Index(content2, EndManagedHostsMarker)
+	footerIdx := strings.Index(content2, "# Custom trailing server entries")
+	if endIdx == -1 || footerIdx == -1 {
+		t.Fatalf("missing end marker or footer in:\n%s", content2)
+	}
+	if footerIdx < endIdx {
+		t.Fatalf("REGRESSION: footer was shifted BEFORE the managed block! endIdx=%d, footerIdx=%d\nFull content:\n%s", endIdx, footerIdx, content2)
+	}
+
+	// Also verify initialHeader is BEFORE the managed block
+	beginIdx := strings.Index(content2, BeginManagedHostsMarker)
+	headerIdx := strings.Index(content2, "# Custom corporate hosts header")
+	if headerIdx > beginIdx {
+		t.Fatalf("REGRESSION: header was shifted AFTER the managed block! beginIdx=%d, headerIdx=%d", beginIdx, headerIdx)
+	}
+
+	// 3. REMOVE: Remove managed hosts and verify surrounding content is intact
+	if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+		t.Fatalf("remove failed: %v", err)
+	}
+
+	data3, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read after remove: %v", err)
+	}
+	content3 := string(data3)
+	if strings.Contains(content3, BeginManagedHostsMarker) || strings.Contains(content3, EndManagedHostsMarker) {
+		t.Fatalf("managed markers lingering in:\n%s", content3)
+	}
+	if !strings.Contains(content3, "# Custom corporate hosts header") || !strings.Contains(content3, "# Custom trailing server entries") {
+		t.Fatalf("surrounding content lost after remove:\n%s", content3)
+	}
+}
+
+func TestHostsReadOnlyFileHandling(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	initial := "127.0.0.1 localhost\r\n"
+	if err := os.WriteFile(tmpHosts, []byte(initial), 0644); err != nil {
+		t.Fatalf("write hosts: %v", err)
+	}
+
+	// Set file as read-only
+	if err := os.Chmod(tmpHosts, 0444); err != nil {
+		t.Fatalf("chmod read-only: %v", err)
+	}
+
+	resolver := &mockHostsResolver{
+		lookupFn: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("162.159.135.232")}, nil
+		},
+	}
+
+	// Sync should handle/clear read-only attribute and succeed
+	if err := SyncManagedHostsFileWithDomains(context.Background(), tmpHosts, resolver, nil, []string{"discord.com"}); err != nil {
+		t.Fatalf("sync on read-only hosts file failed: %v", err)
+	}
+
+	data, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read synced: %v", err)
+	}
+	if !strings.Contains(string(data), "162.159.135.232 discord.com") {
+		t.Fatalf("managed block not written to read-only hosts file:\n%s", string(data))
+	}
+
+	// Mark read-only again
+	_ = os.Chmod(tmpHosts, 0444)
+
+	// Removal should also succeed on read-only file
+	if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+		t.Fatalf("remove on read-only hosts file failed: %v", err)
+	}
+}
+
+func TestHostsEmptyFileRestoresFromBackup(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+	backupPath := HostsBackupPath(tmpHosts)
+
+	hostsFileMu.Lock()
+	origFlush := flushDNSFunc
+	flushDNSFunc = func() error { return nil }
+	hostsFileMu.Unlock()
+	t.Cleanup(func() {
+		hostsFileMu.Lock()
+		flushDNSFunc = origFlush
+		hostsFileMu.Unlock()
+	})
+
+	// Create 0-byte hosts file (simulating corruption / truncation)
+	if err := os.WriteFile(tmpHosts, []byte{}, 0644); err != nil {
+		t.Fatalf("write 0-byte hosts: %v", err)
+	}
+
+	// Create valid backup file
+	backupContent := "127.0.0.1 localhost\r\n192.168.1.1 gateway\r\n"
+	if err := os.WriteFile(backupPath, []byte(backupContent), 0644); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	// Calling RemoveManagedHostsFile on a 0-byte hosts file should NOT delete the backup;
+	// it must restore from backup!
+	if err := RemoveManagedHostsFile(tmpHosts); err != nil {
+		t.Fatalf("RemoveManagedHostsFile failed on empty hosts file: %v", err)
+	}
+
+	data, err := os.ReadFile(tmpHosts)
+	if err != nil {
+		t.Fatalf("read restored hosts: %v", err)
+	}
+	if string(data) != backupContent {
+		t.Fatalf("empty hosts was not restored from backup:\ngot:\n%q\nwant:\n%q", string(data), backupContent)
+	}
+}
+
+func TestHasHostsBackupDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHosts := filepath.Join(tmpDir, "hosts")
+	backupPath := HostsBackupPath(tmpHosts)
+
+	// 1. No backup
+	has, err := HasHostsBackupFile(tmpHosts)
+	if err != nil || has {
+		t.Fatalf("expected (false, nil) when no backup exists, got (%v, %v)", has, err)
+	}
+
+	// 2. Create backup
+	_ = os.WriteFile(backupPath, []byte("127.0.0.1 localhost\r\n"), 0644)
+	has, err = HasHostsBackupFile(tmpHosts)
+	if err != nil || !has {
+		t.Fatalf("expected (true, nil) when backup exists, got (%v, %v)", has, err)
+	}
+}
+
 
 

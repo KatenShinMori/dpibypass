@@ -1011,5 +1011,60 @@ func TestHostsSyncConfigValidation(t *testing.T) {
 			t.Fatal("expected error for empty domain string, got nil")
 		}
 	})
+
+	t.Run("IP address rejected in hosts_sync domains", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.HostsSync.Domains = []string{"192.168.1.1"}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for IP address in hosts_sync.domains, got nil")
+		}
+		if !strings.Contains(err.Error(), "is an IP address") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("leading and trailing dots rejected", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.HostsSync.Domains = []string{".discord.com"}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "leading or trailing dot") {
+			t.Fatalf("expected leading dot error, got: %v", err)
+		}
+
+		cfg.HostsSync.Domains = []string{"discord.com."}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "leading or trailing dot") {
+			t.Fatalf("expected trailing dot error, got: %v", err)
+		}
+	})
+
+	t.Run("consecutive dots rejected", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.HostsSync.Domains = []string{"discord..com"}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "empty label") {
+			t.Fatalf("expected consecutive dots error, got: %v", err)
+		}
+	})
+
+	t.Run("leading and trailing hyphens rejected", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.HostsSync.Domains = []string{"-discord.com"}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "leading or trailing hyphen") {
+			t.Fatalf("expected leading hyphen error, got: %v", err)
+		}
+
+		cfg.HostsSync.Domains = []string{"discord-.com"}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "leading or trailing hyphen") {
+			t.Fatalf("expected trailing hyphen error, got: %v", err)
+		}
+	})
+
+	t.Run("label exceeding 63 chars rejected", func(t *testing.T) {
+		cfg := DefaultConfig()
+		longLabel := strings.Repeat("a", 64)
+		cfg.HostsSync.Domains = []string{longLabel + ".com"}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "exceeds 63 characters") {
+			t.Fatalf("expected label length error, got: %v", err)
+		}
+	})
 }
 

@@ -64,6 +64,30 @@ func HasManagedHostsFile(targetPath string) (bool, error) {
 	return strings.Contains(string(data), BeginManagedHostsMarker), nil
 }
 
+// HasHostsBackup reports whether a backup of the default system hosts file exists.
+func HasHostsBackup() (bool, error) {
+	hostsFileMu.Lock()
+	targetPath := hostsFilePath
+	hostsFileMu.Unlock()
+	return HasHostsBackupFile(targetPath)
+}
+
+// HasHostsBackupFile reports whether a backup file corresponding to targetPath exists.
+func HasHostsBackupFile(targetPath string) (bool, error) {
+	hostsFileMu.Lock()
+	defer hostsFileMu.Unlock()
+
+	backupPath := HostsBackupPath(targetPath)
+	info, err := os.Stat(backupPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat hosts backup %q: %w", backupPath, err)
+	}
+	return !info.IsDir(), nil
+}
+
 // BackupHostsFile creates a backup of targetPath before the first modification.
 // If the backup file already exists, it is left untouched.
 // If targetPath already has a managed block, only the clean unmanaged lines are backed up.
@@ -224,12 +248,7 @@ func SyncManagedHostsFileWithDomains(ctx context.Context, targetPath string, doh
 		return fmt.Errorf("read hosts file %q: %w", targetPath, err)
 	}
 
-	preservedLines, _ := stripManagedBlockLines(string(existingData))
-	var outLines []string
-	outLines = append(outLines, preservedLines...)
-	outLines = append(outLines, managedLines...)
-
-	content := strings.Join(outLines, "\r\n") + "\r\n"
+	content := replaceOrAppendManagedBlock(string(existingData), managedLines)
 	if err := writeHostsFileAtomic(targetPath, []byte(content)); err != nil {
 		return fmt.Errorf("update hosts file %q: %w", targetPath, err)
 	}
@@ -262,7 +281,7 @@ func RemoveManagedHostsFile(targetPath string) error {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// If target was missing but a backup exists, restore from backup
-			if bData, bErr := os.ReadFile(backupPath); bErr == nil {
+			if bData, bErr := os.ReadFile(backupPath); bErr == nil && len(bData) > 0 {
 				_ = writeHostsFileAtomic(targetPath, bData)
 				_ = os.Remove(backupPath)
 				_ = flushDNSFunc()
@@ -270,6 +289,16 @@ func RemoveManagedHostsFile(targetPath string) error {
 			return nil
 		}
 		return fmt.Errorf("read hosts file %q: %w", targetPath, err)
+	}
+
+	// If target hosts file is 0 bytes (e.g. truncated after crash) and backup exists, restore it
+	if len(existingData) == 0 {
+		if bData, bErr := os.ReadFile(backupPath); bErr == nil && len(bData) > 0 {
+			_ = writeHostsFileAtomic(targetPath, bData)
+			_ = os.Remove(backupPath)
+			_ = flushDNSFunc()
+		}
+		return nil
 	}
 
 	preservedLines, foundBlock := stripManagedBlockLines(string(existingData))
@@ -387,11 +416,65 @@ func stripManagedBlockLines(content string) ([]string, bool) {
 	return preserved, foundBlock
 }
 
+func replaceOrAppendManagedBlock(existing string, managedLines []string) string {
+	if existing == "" {
+		return strings.Join(managedLines, "\r\n") + "\r\n"
+	}
+
+	normalized := strings.ReplaceAll(existing, "\r\n", "\n")
+	rawLines := strings.Split(normalized, "\n")
+
+	// If the file ends with a trailing empty string from the split on final \n,
+	// trim that trailing empty entry.
+	if len(rawLines) > 0 && rawLines[len(rawLines)-1] == "" {
+		rawLines = rawLines[:len(rawLines)-1]
+	}
+
+	var prefixLines []string
+	var suffixLines []string
+	inBlock := false
+	foundBlock := false
+
+	for _, line := range rawLines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == BeginManagedHostsMarker {
+			inBlock = true
+			foundBlock = true
+			continue
+		}
+		if trimmed == EndManagedHostsMarker {
+			inBlock = false
+			continue
+		}
+		if inBlock {
+			continue
+		}
+		if !foundBlock {
+			prefixLines = append(prefixLines, line)
+		} else {
+			suffixLines = append(suffixLines, line)
+		}
+	}
+
+	var outLines []string
+	outLines = append(outLines, prefixLines...)
+	outLines = append(outLines, managedLines...)
+	outLines = append(outLines, suffixLines...)
+
+	return strings.Join(outLines, "\r\n") + "\r\n"
+}
+
 func writeHostsFileAtomic(targetPath string, data []byte) error {
 	dir := filepath.Dir(targetPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
+
+	// If target file exists and is marked read-only, ensure write permissions
+	if fi, err := os.Stat(targetPath); err == nil && fi.Mode()&0200 == 0 {
+		_ = os.Chmod(targetPath, 0666)
+	}
+
 	tmpPath := targetPath + ".dpibypass.tmp"
 	if err := os.WriteFile(tmpPath, data, 0644); err == nil {
 		if renameErr := os.Rename(tmpPath, targetPath); renameErr == nil {
@@ -399,5 +482,9 @@ func writeHostsFileAtomic(targetPath string, data []byte) error {
 		}
 		_ = os.Remove(tmpPath)
 	}
-	return os.WriteFile(targetPath, data, 0644)
+	if err := os.WriteFile(targetPath, data, 0644); err != nil {
+		_ = os.Chmod(targetPath, 0666)
+		return os.WriteFile(targetPath, data, 0644)
+	}
+	return nil
 }

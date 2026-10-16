@@ -219,6 +219,7 @@ func executeRun(args []string) error {
 
 	cleanupOnSignal := func() {
 		_ = dnsdoh.RemoveManagedHosts()
+		_ = divert.StopDriverService()
 	}
 	ctx, cancel := setupShutdownContext(cleanupOnSignal)
 	defer cancel()
@@ -504,6 +505,7 @@ func executeRunPacket(ctx context.Context, cfg *config.Config, logger *slog.Logg
 	}
 	defer func() {
 		_ = harness.Close()
+		_ = divert.StopDriverService()
 	}()
 
 	if harnessCfg.InterceptDNS {
@@ -1490,12 +1492,18 @@ func executeRecover(args []string) error {
 	// 3. Inspect & Clean Windows Hosts File Managed Block
 	fmt.Println("\n[3/3] Windows Hosts File Managed Block:")
 	hasLeftover, hostsErr := dnsdoh.HasManagedHosts()
+	hasBackup, _ := dnsdoh.HasHostsBackup()
 	if hostsErr != nil {
 		fmt.Printf("  Hosts Status     : Error inspecting hosts file: %v\n", hostsErr)
 	} else if hasLeftover {
 		fmt.Println("  Hosts Status     : Lingering managed block DETECTED")
 	} else {
 		fmt.Println("  Hosts Status     : Clean (no managed block found)")
+	}
+	if hasBackup {
+		fmt.Printf("  Backup File      : Present (%s)\n", dnsdoh.HostsBackupPath(dnsdoh.DefaultHostsPath))
+	} else {
+		fmt.Println("  Backup File      : None")
 	}
 
 	if checkOnly {
