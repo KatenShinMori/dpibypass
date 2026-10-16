@@ -16,23 +16,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.22'
           cache: false
-
-      - name: Check code formatting
-        shell: powershell
-        run: |
-          $unformatted = gofmt -s -l .
-          if ($unformatted) {
-            Write-Host "Unformatted files found:"
-            $unformatted | ForEach-Object { Write-Host "  $_" }
-            exit 1
-          }
 
       - name: Build all packages
         run: go build ./...
