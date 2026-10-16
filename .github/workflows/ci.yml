@@ -24,6 +24,16 @@ jobs:
           go-version-file: 'go.mod'
           cache: false
 
+      - name: Check code formatting
+        shell: powershell
+        run: |
+          $unformatted = gofmt -s -l .
+          if ($unformatted) {
+            Write-Host "Unformatted files found:"
+            $unformatted | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+
       - name: Build all packages
         run: go build ./...
 

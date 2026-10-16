@@ -114,20 +114,36 @@ Push-Location -Path $repoRoot
 try {
     # 4. Optional pre-build validation
     if ($RunTests) {
-        Write-Host "Running automated unit and integration tests (go test -short -count=1 ./...)..."
-        & go test -short -count=1 ./...
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Pre-build test suite failed with exit code $LASTEXITCODE."
-            exit $LASTEXITCODE
+        $cleanupTmp = $false
+        if ([string]::IsNullOrWhiteSpace($env:GOTMPDIR) -or -not (Test-Path -Path $env:GOTMPDIR)) {
+            $localTmp = [System.IO.Path]::Combine($repoRoot, ".gotmp")
+            if (-not (Test-Path -Path $localTmp)) {
+                New-Item -ItemType Directory -Path $localTmp -Force | Out-Null
+            }
+            $env:GOTMPDIR = $localTmp
+            $cleanupTmp = $true
         }
+        try {
+            Write-Host "Running automated unit and integration tests (go test -short -count=1 ./...)..."
+            & go test -short -count=1 ./...
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Pre-build test suite failed with exit code $LASTEXITCODE."
+                exit $LASTEXITCODE
+            }
 
-        Write-Host "Running static analysis (go vet ./...)..."
-        & go vet ./...
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Static analysis (go vet) failed with exit code $LASTEXITCODE."
-            exit $LASTEXITCODE
+            Write-Host "Running static analysis (go vet ./...)..."
+            & go vet ./...
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Static analysis (go vet) failed with exit code $LASTEXITCODE."
+                exit $LASTEXITCODE
+            }
+            Write-Host "Pre-build checks passed successfully."
+        } finally {
+            if ($cleanupTmp) {
+                Remove-Item -Path $env:GOTMPDIR -Recurse -Force -ErrorAction SilentlyContinue
+                $env:GOTMPDIR = ""
+            }
         }
-        Write-Host "Pre-build checks passed successfully."
     }
 
     # 5. Resolve build metadata

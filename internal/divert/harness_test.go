@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,11 +76,15 @@ func TestFilterOutboundWithDNSSyntax(t *testing.T) {
 
 func findTestWinDivertDLL(t *testing.T) *syscall.DLL {
 	t.Helper()
-	candidates := []string{
+	var candidates []string
+	if _, filename, _, ok := runtime.Caller(0); ok {
+		candidates = append(candidates, filepath.Join(filepath.Dir(filename), "..", "..", "WinDivert.dll"))
+	}
+	candidates = append(candidates,
 		filepath.Join("..", "..", "WinDivert.dll"),
 		"WinDivert.dll",
 		filepath.Join("..", "WinDivert.dll"),
-	}
+	)
 	for _, candidate := range candidates {
 		dll, err := syscall.LoadDLL(candidate)
 		if err == nil {
@@ -5705,10 +5710,19 @@ func TestWinDivertFilterCompileAndEvalBootstrapAndSinkhole(t *testing.T) {
 
 func TestBatchScriptsSyntax(t *testing.T) {
 	scriptNames := []string{"start-bypass.bat", "launch-discord.bat", "stop-and-recover.bat"}
+	var repoRoot string
+	if _, filename, _, ok := runtime.Caller(0); ok {
+		repoRoot = filepath.Join(filepath.Dir(filename), "..", "..")
+	}
 	for _, name := range scriptNames {
 		var data []byte
 		var err error
-		for _, cand := range []string{filepath.Join("..", "..", name), name, filepath.Join("..", name)} {
+		var candidates []string
+		if repoRoot != "" {
+			candidates = append(candidates, filepath.Join(repoRoot, name))
+		}
+		candidates = append(candidates, filepath.Join("..", "..", name), name, filepath.Join("..", name))
+		for _, cand := range candidates {
 			data, err = os.ReadFile(cand)
 			if err == nil {
 				break

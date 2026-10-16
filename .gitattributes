@@ -1,0 +1,9 @@
+# Ensure text files normalize line endings to LF on commit
+* text=auto eol=lf
+
+# Go source files must always use LF across all platforms
+*.go text eol=lf
+
+# Windows batch files and PowerShell scripts prefer CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
