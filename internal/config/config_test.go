@@ -933,7 +933,7 @@ func TestPacketConfig_AutoLearn(t *testing.T) {
 }
 
 func TestRootConfigFilesValid(t *testing.T) {
-	for _, filename := range []string{"../../config.json", "../../config.phase2-test.json", "../../config.sample.json"} {
+	for _, filename := range []string{"../../config.json", "../../examples/config.phase2-test.json", "../../config.phase2-test.json", "../../config.sample.json"} {
 		if _, err := os.Stat(filename); os.IsNotExist(err) {
 			continue
 		}

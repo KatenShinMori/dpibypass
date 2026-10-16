@@ -101,53 +101,54 @@ if ($baselineExitCode -eq 0 -and ($baselineOutput | Out-String) -match "HTTP/\d"
 & ipconfig.exe /flushdns 2>&1 | Out-Null
 
 # 5. Automated Strategy Matrix
+$testConfigPath = if (Test-Path "examples\config.phase2-test.json") { "examples\config.phase2-test.json" } elseif (Test-Path "config.phase2-test.json") { "config.phase2-test.json" } else { "config.json" }
 $profiles = @(
     @{
         ID = 1
         Name = "Split + Bad Checksum"
-        Args = @("run", "--mode", "packet", "--config", "config.phase2-test.json", "--fake-mode", "wrong-chksum", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
+        Args = @("run", "--mode", "packet", "--config", $testConfigPath, "--fake-mode", "wrong-chksum", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
         Desc = "Out-of-Order Segment 2 first + Fake ClientHello with corrupted RFC 793 TCP Checksum"
     },
     @{
         ID = 2
         Name = "Split + TTL 5"
-        Args = @("run", "--mode", "packet", "--config", "config.phase2-test.json", "--fake-mode", "ttl", "--fake-ttl", "5", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
+        Args = @("run", "--mode", "packet", "--config", $testConfigPath, "--fake-mode", "ttl", "--fake-ttl", "5", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
         Desc = "Out-of-Order Segment 2 first + Low-TTL (5 hops) dummy ClientHello"
     },
     @{
         ID = 3
         Name = "Split + TTL 4"
-        Args = @("run", "--mode", "packet", "--config", "config.phase2-test.json", "--fake-mode", "ttl", "--fake-ttl", "4", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
+        Args = @("run", "--mode", "packet", "--config", $testConfigPath, "--fake-mode", "ttl", "--fake-ttl", "4", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
         Desc = "Out-of-Order Segment 2 first + Low-TTL (4 hops) dummy ClientHello (sweet spot)"
     },
     @{
         ID = 4
         Name = "Split + TTL 6"
-        Args = @("run", "--mode", "packet", "--config", "config.phase2-test.json", "--fake-mode", "ttl", "--fake-ttl", "6", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
+        Args = @("run", "--mode", "packet", "--config", $testConfigPath, "--fake-mode", "ttl", "--fake-ttl", "6", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
         Desc = "Out-of-Order Segment 2 first + Low-TTL (6 hops) dummy ClientHello"
     },
     @{
         ID = 5
         Name = "Combined (TTL 5 + BadChecksum + 2ms Delay)"
-        Args = @("run", "--mode", "packet", "--config", "config.phase2-test.json", "--fake-mode", "both", "--fake-ttl", "5", "--split-offset", "sni-mid", "--delay-ms", "2", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
+        Args = @("run", "--mode", "packet", "--config", $testConfigPath, "--fake-mode", "both", "--fake-ttl", "5", "--split-offset", "sni-mid", "--delay-ms", "2", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
         Desc = "Low-TTL 5 + Bad Checksum + 2ms inter-packet delay before Segment 1"
     },
     @{
         ID = 6
         Name = "Pure Out-of-Order Split (No Fake)"
-        Args = @("run", "--mode", "packet", "--config", "config.phase2-test.json", "--fake-mode", "none", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
+        Args = @("run", "--mode", "packet", "--config", $testConfigPath, "--fake-mode", "none", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
         Desc = "Pure wire-level fragmentation emitting Segment 2 before Segment 1 (no fake injection)"
     },
     @{
         ID = 7
         Name = "Split + TTL 3"
-        Args = @("run", "--mode", "packet", "--config", "config.phase2-test.json", "--fake-mode", "ttl", "--fake-ttl", "3", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
+        Args = @("run", "--mode", "packet", "--config", $testConfigPath, "--fake-mode", "ttl", "--fake-ttl", "3", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
         Desc = "Out-of-Order Segment 2 first + Low-TTL (3 hops) dummy ClientHello (ultra-close middlebox)"
     },
     @{
         ID = 8
         Name = "Split + Multi-TTL (4+3)"
-        Args = @("run", "--mode", "packet", "--config", "config.phase2-test.json", "--fake-mode", "multi-ttl", "--fake-ttl", "4", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
+        Args = @("run", "--mode", "packet", "--config", $testConfigPath, "--fake-mode", "multi-ttl", "--fake-ttl", "4", "--split-offset", "sni-mid", "--intercept-dns", "--no-autolearn", "--duration-s", "20")
         Desc = "Out-of-Order Segment 2 first + Multi-hop (4 and 3 hops) dummy ClientHello to defeat ECMP shifts"
     }
 )

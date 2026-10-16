@@ -430,7 +430,7 @@ func TestScriptsAre7BitASCII(t *testing.T) {
 func TestHarnessConfig_DoHInitialization(t *testing.T) {
 	root := filepath.Join("..", "..")
 
-	testConfigs := []string{"config.phase2-test.json", "config.json"}
+	testConfigs := []string{filepath.Join("examples", "config.phase2-test.json"), "config.json"}
 	for _, cfgName := range testConfigs {
 		cfgPath := filepath.Join(root, cfgName)
 		cfg, err := config.Load(cfgPath)

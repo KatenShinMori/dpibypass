@@ -6,6 +6,17 @@
 /dpibypass
 bin/
 
+# WinDivert driver distribution files
+WinDivert.dll
+WinDivert64.sys
+WinDivert32.sys
+
+# Local configurations
+*.local.json
+config.local.json
+config.*.local.json
+local-config.json
+
 # Temporary and backup files
 *.old
 *.bak

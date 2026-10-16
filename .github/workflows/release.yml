@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build dpibypass.exe
+        shell: powershell
+        run: |
+          $ver = "${{ github.ref_name }}"
+          $commit = "${{ github.sha }}"
+          $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $ldflags = "-s -w -X main.version=$ver -X main.commit=$commit -X main.buildDate=$buildDate"
+          go build -ldflags $ldflags -o dpibypass.exe ./cmd/dpibypass
+
+      - name: Generate SHA256SUMS
+        shell: powershell
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 dpibypass.exe).Hash.ToLower()
+          "$hash  dpibypass.exe" | Out-File -Encoding ascii SHA256SUMS
+          Get-Content SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dpibypass.exe
+            SHA256SUMS
+          name: dpibypass ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            ## dpibypass ${{ github.ref_name }}
+
+            ### ⚠️ Important Notice: WinDivert Driver Required
+            `dpibypass.exe` requires the official Microsoft-signed **WinDivert 2.2.2** x64 driver to capture and inspect packets on Windows. Due to licensing and kernel driver distribution requirements, WinDivert driver binaries are **not bundled** with this binary release.
+
+            **You must download WinDivert 2.2.2 separately from the official source:**
+            1. Download `WinDivert-2.2.2-A.zip` from either:
+               - Official Website: [reqcrypt.org/windivert.html](https://reqcrypt.org/windivert.html)
+               - Official GitHub Releases: [basil00/Divert releases](https://github.com/basil00/Divert/releases/tag/v2.2.2)
+            2. Extract `x64\WinDivert.dll` and `x64\WinDivert64.sys` into the same directory as `dpibypass.exe`.
+            3. Run `dpibypass.exe` from an elevated Administrator prompt.
+
+            ### Integrity Verification
+            Verify your download using the included `SHA256SUMS` file:
+            ```powershell
+            Get-FileHash -Algorithm SHA256 dpibypass.exe
+            ```
